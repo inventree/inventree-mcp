@@ -43,10 +43,9 @@ The plugin has two settings, available under **Settings > Plugin Settings**:
   before any write tool can do anything - it's a plugin-wide kill switch independent of per-user
   roles, not a replacement for them.
 
-There is no separate scoping setting - access is controlled entirely by the calling user's normal
-InvenTree role assignments (Settings > User Roles). For agent/service use, create a dedicated user
-with only the roles the agent actually needs (e.g. `part.view`, `stock.view`), rather than reusing
-an admin account.
+Access is controlled by the calling user's normal InvenTree role assignments (Settings > User
+Roles). For agent/service use, create a dedicated user with only the roles the agent actually
+needs (e.g. `part.view`, `stock.view`), rather than reusing an admin account.
 
 ## Usage
 
@@ -57,5 +56,14 @@ The MCP endpoint is available at:
 ```
 
 Configure your MCP client to connect to this URL using Streamable HTTP transport, authenticating
-with an InvenTree API token (`Authorization: Token <token>`) belonging to a user with the
-appropriate roles.
+with one of:
+
+- An InvenTree API token: `Authorization: Token <token>`, belonging to a user with the
+  appropriate roles.
+- Basic auth (username/password).
+- An OAuth2 access token: `Authorization: Bearer <token>`. If the token carries granular scopes
+  (e.g. `r:view:part`), those scopes narrow access *below* whatever the underlying user's roles
+  would otherwise allow - use this to issue an agent a token scoped more tightly than a full
+  service-account user, without creating a separate low-privilege user for every agent.
+
+Session/cookie auth is not supported for this endpoint (not meaningful for a machine client).

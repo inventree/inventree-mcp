@@ -17,7 +17,8 @@ from mcp.server.fastmcp.exceptions import ToolError
 from rest_framework.test import APIRequestFactory, force_authenticate
 from rest_framework.views import APIView
 
-from .context import get_current_user
+from .context import get_current_oauth2_token, get_current_user
+from .oauth2_bridge import authentication_classes_for, scoped_view_class
 from .settings import get_plugin_setting
 
 _factory = APIRequestFactory()
@@ -33,6 +34,7 @@ def _call_view_sync(
     **view_kwargs: Any,
 ) -> Any:
     user = get_current_user()
+    oauth2_token = get_current_oauth2_token()
     method = method.upper()
 
     if method != "GET" and get_plugin_setting("MCP_READ_ONLY"):
@@ -48,9 +50,23 @@ def _call_view_sync(
     else:
         request = factory_method(path, data=data or {}, format="json")
 
-    force_authenticate(request, user=user)
+    if oauth2_token is not None:
+        # The MCP request itself was OAuth2-authenticated: make the proxied
+        # view see the *real* token (via a real OAuth2Authentication
+        # subclass), so InvenTreeTokenMatchesOASRequirements enforces the
+        # token's actual granted scopes - not just the user's role
+        # permissions. force_authenticate() can't do this: it always
+        # presents as a synthetic ForcedAuthentication, which the scope
+        # check doesn't recognize as OAuth2 at all. scoped_view_class() also
+        # works around a separate InvenTree core bug - see oauth2_bridge.py.
+        view = scoped_view_class(view_cls).as_view(
+            authentication_classes=authentication_classes_for(user, oauth2_token)
+        )
+    else:
+        force_authenticate(request, user=user)
+        view = view_cls.as_view()
 
-    response = view_cls.as_view()(request, **view_kwargs)
+    response = view(request, **view_kwargs)
     response.render()
 
     body = json.loads(response.rendered_content or b"{}")

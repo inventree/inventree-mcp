@@ -1,26 +1,48 @@
 """Django view adapter bridging the MCP Streamable HTTP transport onto InvenTree.
 
-InvenTree's own auth middleware populates request.user (from a Token,
-Bearer, Basic, or session credential) before this view runs. We gate on
-REQUIRE_AUTH the same way the rest of the plugin does, then bind the
-authenticated user into the MCP request context (see context.py) so tools
-can act as that user via proxy.call_view() - this is what makes per-tool
-permission enforcement possible, instead of trusting "authenticated =
-allowed to do anything" as a single plugin-wide bypass.
+This view is marked auth_exempt so it can run its own, full DRF
+authentication (Token / Basic / OAuth2 - see authentication_classes below).
+That's necessary, not just a style choice:
+InvenTree.middleware.AuthRequiredMiddleware only recognizes session cookies
+and InvenTree's own ApiToken, and gates on a fixed path allowlist that
+doesn't include plugin URLs - an OAuth2 bearer token would otherwise never
+even reach this view (verified: /api/part/ accepts it, this endpoint 401s
+before dispatch() runs at all). We gate on REQUIRE_AUTH ourselves, then bind
+the authenticated identity into the MCP request context (see context.py) so
+tools can act as that user - and, for OAuth2 requests, under that token's
+actual granted scopes, not just the user's role permissions - via
+proxy.call_view(). This is what makes per-tool permission enforcement
+possible, instead of trusting "authenticated = allowed to do anything" as a
+single plugin-wide bypass.
+
+authentication_classes deliberately excludes SessionAuthentication (DRF's
+default authenticator list includes it, for browser/UI convenience). MCP
+clients are machine-to-machine and never send a CSRF token, and including it
+actively breaks OAuth2 here: oauth2_provider's own OAuth2TokenMiddleware
+(already in InvenTree's MIDDLEWARE, running after AuthRequiredMiddleware)
+resolves the Bearer token and sets request.user at the middleware level for
+every request. SessionAuthentication then sees an already-active user and
+treats it as session auth, calling enforce_csrf() - which fails with "CSRF
+Failed: CSRF cookie not set." for every OAuth2 request. Verified via a direct
+trace: request.user was already the correct user by the time
+SessionAuthentication.authenticate() ran, purely from that middleware.
 """
 
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from asgiref.sync import async_to_sync
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.urls import path
-from django.utils.decorators import method_decorator
-from django.views import View
-from django.views.decorators.csrf import csrf_exempt
+from InvenTree.permissions import auth_exempt
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
+from oauth2_provider.contrib.rest_framework.authentication import OAuth2Authentication
+from rest_framework import exceptions
+from rest_framework.authentication import BasicAuthentication
+from rest_framework.views import APIView
+from users.authentication import ApiTokenAuthentication, ExtendedOAuth2Authentication
 
 from .context import reset_current_user, set_current_user
 from .mcp_server import mcp
@@ -116,20 +138,52 @@ def _error_response(status: int, message: str) -> JsonResponse:
     )
 
 
-@method_decorator(csrf_exempt, name="dispatch")
-class MCPView(View):
-    """Django view handling MCP Streamable HTTP transport requests."""
+class MCPView(APIView):
+    """DRF view handling MCP Streamable HTTP transport requests.
+
+    Runs its own authentication (Token / Basic / OAuth2 - see module
+    docstring for why SessionAuthentication is deliberately excluded) rather
+    than relying on permission_classes - REQUIRE_AUTH is admin-configurable,
+    and per-tool authorization happens downstream in proxy.call_view(), not
+    here.
+    """
+
+    authentication_classes: ClassVar[list] = [
+        ApiTokenAuthentication,
+        BasicAuthentication,
+        ExtendedOAuth2Authentication,
+    ]
+    permission_classes: ClassVar[list] = []
 
     def dispatch(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
-        if get_plugin_setting("REQUIRE_AUTH") and not (
-            hasattr(request, "user") and request.user.is_authenticated
-        ):
+        # Force Django to cache the raw body now, before initialize_request()
+        # wraps it in a DRF Request - DRF's own body/stream handling during
+        # authentication otherwise leaves the raw request unable to satisfy a
+        # later `request.body` read (_handle_mcp_request needs it for the
+        # ASGI scope), raising RawPostDataException.
+        _ = request.body
+
+        self.args = args
+        self.kwargs = kwargs
+        drf_request = self.initialize_request(request, *args, **kwargs)
+
+        try:
+            self.perform_authentication(drf_request)
+        except exceptions.APIException as exc:
+            return _error_response(getattr(exc, "status_code", 401), str(exc))
+
+        user = drf_request.user
+
+        if get_plugin_setting("REQUIRE_AUTH") and not (user and user.is_authenticated):
             return _error_response(
                 401,
                 "Authentication required. Provide a valid Token, Bearer, or Basic credential.",
             )
 
-        token = set_current_user(request.user if hasattr(request, "user") else None)
+        is_oauth2 = isinstance(
+            drf_request.successful_authenticator, OAuth2Authentication
+        )
+        token = set_current_user(user, drf_request.auth if is_oauth2 else None)
         try:
             # async_to_sync (rather than a hand-rolled event loop) is what lets
             # proxy.call_view()'s sync_to_async(thread_sensitive=True) route
@@ -145,4 +199,4 @@ class MCPView(View):
             reset_current_user(token)
 
 
-urlpatterns = [path("mcp/", MCPView.as_view(), name="mcp-endpoint")]
+urlpatterns = [path("mcp/", auth_exempt(MCPView.as_view()), name="mcp-endpoint")]

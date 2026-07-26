@@ -9,13 +9,16 @@ credential must not be enough on its own.
 
 from __future__ import annotations
 
+import datetime
 from typing import ClassVar
 
 from asgiref.sync import sync_to_async
 from django.contrib.auth import get_user_model
 from django.test import override_settings
+from django.utils import timezone
 from InvenTree.unit_test import InvenTreeTestCase
 from mcp.server.fastmcp.exceptions import ToolError
+from oauth2_provider.models import AccessToken, Application
 from part.api import PartList
 from part.models import Part, PartCategory
 from plugin import registry
@@ -53,6 +56,37 @@ class MCPToolPermissionTest(InvenTreeTestCase):
         # A second user, deliberately given no roles at all.
         cls.no_access_user = get_user_model().objects.create_user(
             username="noaccess", password="password", email="noaccess@example.org"
+        )
+
+        # Real OAuth2 tokens for cls.user, at two different scopes - used to
+        # prove a token can narrow access *below* what the user's role would
+        # otherwise allow (see the oauth2_bridge.py tests below).
+        cls.oauth2_app, _ = Application.objects.get_or_create(
+            name="mcp-test-app",
+            defaults={
+                "client_type": "confidential",
+                "authorization_grant_type": "client-credentials",
+                "user": cls.user,
+            },
+        )
+        expires = timezone.now() + datetime.timedelta(hours=1)
+        # PartList requires *both* scopes together - the 'part' table is
+        # associated with both the 'part' and 'build' rulesets (BOM/build
+        # features touch parts too), so InvenTree's own dynamic scope
+        # resolution combines them into one required set, not alternatives.
+        cls.oauth2_token_with_part_scope = AccessToken.objects.create(
+            user=cls.user,
+            application=cls.oauth2_app,
+            token="mcp-test-token-part-view",
+            expires=expires,
+            scope="r:view:part r:view:build",
+        )
+        cls.oauth2_token_without_part_scope = AccessToken.objects.create(
+            user=cls.user,
+            application=cls.oauth2_app,
+            token="mcp-test-token-general-read",
+            expires=expires,
+            scope="g:read",
         )
 
         # PLUGIN_TESTING_SETUP (see class decorator) is what lets a
@@ -143,3 +177,30 @@ class MCPToolPermissionTest(InvenTreeTestCase):
             await call_view(PartList, "POST", "/api/part/", data={})
 
         self.assertNotIn("read-only", str(cm.exception).lower())
+
+    async def test_oauth2_token_scope_can_narrow_below_user_role(self):
+        """A token missing the relevant scope is rejected even though the user's role allows it.
+
+        self.user has the 'part.view' role (see roles above), so this would
+        succeed under plain role-based access - the point is that an OAuth2
+        token can restrict a user's access below their normal role, not just
+        confirm it.
+        """
+        context.set_current_user(
+            self.user, oauth2_token=self.oauth2_token_without_part_scope
+        )
+        self.addCleanup(context.set_current_user, None)
+
+        with self.assertRaises(ToolError):
+            await list_parts()
+
+    async def test_oauth2_token_with_matching_scope_succeeds(self):
+        """A token that does carry the relevant scope is allowed, same as plain role access."""
+        context.set_current_user(
+            self.user, oauth2_token=self.oauth2_token_with_part_scope
+        )
+        self.addCleanup(context.set_current_user, None)
+
+        result = await list_parts(search="Test Part")
+        names = [p["name"] for p in result["results"]]
+        self.assertIn("Test Part", names)
