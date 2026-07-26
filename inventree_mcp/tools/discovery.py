@@ -7,7 +7,41 @@ from mcp.server.fastmcp.exceptions import ToolError
 from ..filter_introspection import describe_filterset
 from ..mcp_server import mcp
 
-_RESOURCES = ("part", "stock", "location", "category")
+
+def _part_list() -> type:
+    from part.api import PartList
+
+    return PartList
+
+
+def _stock_list() -> type:
+    from stock.api import StockList
+
+    return StockList
+
+
+def _stock_location_list() -> type:
+    from stock.api import StockLocationList
+
+    return StockLocationList
+
+
+def _category_list() -> type:
+    from part.api import CategoryList
+
+    return CategoryList
+
+
+# Values are loader functions, not the view classes directly, so each import
+# stays lazy (matches tools/*.py's own per-call imports) - importing e.g.
+# part.api at module level risks AppRegistryNotReady if InvenTree's plugin
+# registry scans this module before Django's app registry is ready.
+_RESOURCE_LOADERS = {
+    "part": _part_list,
+    "stock": _stock_list,
+    "location": _stock_location_list,
+    "category": _category_list,
+}
 
 
 @mcp.tool()
@@ -30,25 +64,12 @@ def describe_filters(resource: str) -> dict:
             directly in that list tool's `filters` argument, e.g.
             filters={"is_variant": true, "ordering": "-in_stock"}.
     """
-    if resource == "part":
-        from part.api import PartList
+    loader = _RESOURCE_LOADERS.get(resource)
 
-        view_cls = PartList
-    elif resource == "stock":
-        from stock.api import StockList
-
-        view_cls = StockList
-    elif resource == "location":
-        from stock.api import StockLocationList
-
-        view_cls = StockLocationList
-    elif resource == "category":
-        from part.api import CategoryList
-
-        view_cls = CategoryList
-    else:
+    if loader is None:
         raise ToolError(
-            f"Unknown resource {resource!r}. Choose one of: {', '.join(_RESOURCES)}"
+            f"Unknown resource {resource!r}. Choose one of: "
+            f"{', '.join(_RESOURCE_LOADERS)}"
         )
 
-    return describe_filterset(view_cls)
+    return describe_filterset(loader())
