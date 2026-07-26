@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class _Identity:
-    user: "AbstractUser"
+    user: AbstractUser
     # The real oauth2_provider AccessToken, if the MCP request itself was
     # OAuth2-authenticated - None for token/basic/session auth. Propagated so
     # proxy.call_view() can make the proxied view see the token's *actual*
@@ -33,7 +33,7 @@ _current_identity: ContextVar[Optional[_Identity]] = ContextVar(
 
 
 def set_current_user(
-    user: Optional["AbstractUser"], oauth2_token: Optional[Any] = None
+    user: Optional[AbstractUser], oauth2_token: Optional[Any] = None
 ) -> Token:
     """Bind *user* (and, if OAuth2-authenticated, the real access token) for this context."""
     identity = _Identity(user, oauth2_token) if user is not None else None
@@ -45,7 +45,7 @@ def reset_current_user(token: Token) -> None:
     _current_identity.reset(token)
 
 
-def get_current_user() -> "AbstractUser":
+def get_current_user() -> AbstractUser:
     """Return the user bound to the current MCP request.
 
     Raises:

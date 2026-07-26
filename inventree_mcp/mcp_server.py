@@ -25,4 +25,4 @@ mcp = FastMCP(
 )
 
 # Import tool modules for their side effect of registering @mcp.tool() functions.
-from .tools import categories, locations, parts, stock  # noqa: E402,F401
+from .tools import categories, locations, parts, stock  # noqa: E402, F401
