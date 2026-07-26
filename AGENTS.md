@@ -19,17 +19,27 @@ from-scratch implementation rather than a fork.
 New tools: pick (or add) an existing API view class and wrap it with `call_view()`. Don't
 reimplement filtering/serialization by hand.
 
+`call_view()` is also where the `MCP_READ_ONLY` plugin setting (default `True`) is enforced: any
+non-GET call raises `ToolError` before it ever reaches the view, unless an administrator has
+explicitly turned it off. No write tools exist yet, but this gate already applies to every future
+one automatically since it lives in the shared chokepoint - don't duplicate the check per-tool,
+and don't bypass `call_view()` for a "just this once" write.
+
 ## File map
 
 - `context.py` - contextvar carrying the authenticated Django user into tool execution (tools
   don't receive a request object directly).
-- `proxy.py` - `call_view()`, the permission boundary described above.
+- `proxy.py` - `call_view()`, the permission boundary described above, including the
+  `MCP_READ_ONLY` gate.
+- `settings.py` - `get_plugin_setting()`, shared helper for reading this plugin's own settings
+  (`REQUIRE_AUTH`, `MCP_READ_ONLY`); fails safe to the restrictive default if the plugin instance
+  can't be resolved (e.g. not yet activated, or outside a real request).
 - `mcp_server.py` - the `FastMCP` instance; imports `tools/*` for their `@mcp.tool()` side effect.
 - `mcp_transport.py` - Django view bridging Streamable HTTP onto the FastMCP server.
 - `tools/` - one module per resource (`parts.py`, `stock.py`, `locations.py`, `categories.py`),
   each a thin async wrapper around `call_view()`.
-- `core.py` - the `InvenTreePlugin` subclass (`UrlsMixin` + `SettingsMixin`), `REQUIRE_AUTH`
-  setting.
+- `core.py` - the `InvenTreePlugin` subclass (`UrlsMixin` + `SettingsMixin`), `REQUIRE_AUTH` and
+  `MCP_READ_ONLY` settings.
 
 ## The async/threading gotcha (read this before touching proxy.py or mcp_transport.py)
 
@@ -73,6 +83,16 @@ all fails closed (`PermissionError`). When binding a user in a test, use
 `context.reset_current_user(token)` - because Django's async test wrapper runs `addCleanup`
 callbacks outside the test coroutine's own `contextvars.Context`, and a `Token` can only be reset
 in the exact `Context` that created it.
+
+If a test needs `registry.get_plugin("inventree-mcp")` to actually resolve (e.g. to toggle
+`MCP_READ_ONLY` via `plugin.set_setting(...)`), note that a pip-installed, entry-point-distributed
+plugin is normally invisible to the registry during a test run at all. You need, in
+`setUpTestData`: the class decorated with `@override_settings(PLUGIN_TESTING_SETUP=True)`, then
+`registry.reload_plugins(full_reload=True, collect=True)` (makes the registry aware of it) *and*
+`registry.set_plugin_state("inventree-mcp", True)` (`get_plugin()` filters on active by default).
+Both are sync ORM calls - if done inside an `async def` test body rather than the sync
+`setUpTestData`, wrap them in `sync_to_async` too (same reasoning as the threading section above).
+See `MCPToolPermissionTest` in `test_mcp.py` for the working pattern.
 
 To test against a real running dev server instead of/in addition to the test suite, mint a
 short-lived API token for a real user (`users.models.ApiToken.objects.create(user=..., name=...)`,

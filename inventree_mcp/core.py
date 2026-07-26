@@ -35,7 +35,13 @@ class InvenTreeMCP(SettingsMixin, UrlsMixin, InvenTreePlugin):
             "description": "Reject unauthenticated requests to the MCP endpoint. Disable only for local testing.",
             "validator": bool,
             "default": True,
-        }
+        },
+        "MCP_READ_ONLY": {
+            "name": "Read Only",
+            "description": "Block all write actions via the MCP endpoint, regardless of the calling user's permissions.",
+            "validator": bool,
+            "default": True,
+        },
     }
 
     # Custom URL endpoints (from UrlsMixin)

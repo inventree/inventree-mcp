@@ -14,7 +14,9 @@ than they could via the normal API. Tool code must never query the Django ORM di
 tools by wrapping an existing (or new) API view, not by reimplementing queries.
 
 Currently read-only: parts, stock items, stock locations, and part categories (list + detail).
-Write tools are intentionally not implemented yet.
+No write tools are implemented yet - and when they are, the `MCP_READ_ONLY` setting (see
+Configuration below) blocks any write action by default regardless of the calling user's
+permissions, as a second layer on top of per-user roles.
 
 ## Installation
 
@@ -32,10 +34,14 @@ pip install inventree-mcp
 
 ## Configuration
 
-The plugin has one setting, available under **Settings > Plugin Settings**:
+The plugin has two settings, available under **Settings > Plugin Settings**:
 
 - **Require Authentication** (`REQUIRE_AUTH`, default `True`): reject unauthenticated requests to
   the MCP endpoint. Only disable this for local testing.
+- **Read Only** (`MCP_READ_ONLY`, default `True`): block all write actions via the MCP endpoint,
+  regardless of the calling user's permissions. An administrator must explicitly disable this
+  before any write tool can do anything - it's a plugin-wide kill switch independent of per-user
+  roles, not a replacement for them.
 
 There is no separate scoping setting - access is controlled entirely by the calling user's normal
 InvenTree role assignments (Settings > User Roles). For agent/service use, create a dedicated user

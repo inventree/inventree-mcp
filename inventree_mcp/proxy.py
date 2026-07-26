@@ -18,6 +18,7 @@ from rest_framework.test import APIRequestFactory, force_authenticate
 from rest_framework.views import APIView
 
 from .context import get_current_user
+from .settings import get_plugin_setting
 
 _factory = APIRequestFactory()
 
@@ -33,6 +34,12 @@ def _call_view_sync(
 ) -> Any:
     user = get_current_user()
     method = method.upper()
+
+    if method != "GET" and get_plugin_setting("MCP_READ_ONLY"):
+        raise ToolError(
+            "This MCP server is running in read-only mode; write actions are disabled. "
+            "An administrator must disable the 'Read Only' plugin setting to allow them."
+        )
 
     factory_method = getattr(_factory, method.lower())
 
@@ -81,8 +88,9 @@ async def call_view(
 
     Raises:
         ToolError: the underlying API call did not succeed (permission denied,
-            not found, validation error, ...). The message is safe to surface
-            to the calling agent.
+            not found, validation error, ...), or method is not GET while the
+            plugin's MCP_READ_ONLY setting is enabled (the default). The
+            message is safe to surface to the calling agent.
 
     Note:
         FastMCP calls tool functions directly in the request's event loop, and

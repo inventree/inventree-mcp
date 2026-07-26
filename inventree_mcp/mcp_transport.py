@@ -12,7 +12,6 @@ allowed to do anything" as a single plugin-wide bypass.
 from __future__ import annotations
 
 import asyncio
-import contextlib
 from typing import TYPE_CHECKING, Any
 
 from asgiref.sync import async_to_sync
@@ -25,6 +24,7 @@ from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 
 from .context import reset_current_user, set_current_user
 from .mcp_server import mcp
+from .settings import get_plugin_setting
 
 if TYPE_CHECKING:
     from collections.abc import MutableMapping
@@ -39,24 +39,6 @@ def _new_session_manager() -> StreamableHTTPSessionManager:
     return StreamableHTTPSessionManager(
         app=mcp._mcp_server, json_response=True, stateless=True
     )
-
-
-def _get_plugin_instance() -> Any:
-    from plugin import registry
-
-    return registry.get_plugin("inventree-mcp")
-
-
-def _require_auth() -> bool:
-    plugin = _get_plugin_instance()
-
-    if plugin is None:
-        return True
-
-    with contextlib.suppress(Exception):
-        return bool(plugin.get_setting("REQUIRE_AUTH"))
-
-    return True
 
 
 def _build_asgi_scope(request: HttpRequest) -> Scope:
@@ -139,7 +121,7 @@ class MCPView(View):
     """Django view handling MCP Streamable HTTP transport requests."""
 
     def dispatch(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
-        if _require_auth() and not (
+        if get_plugin_setting("REQUIRE_AUTH") and not (
             hasattr(request, "user") and request.user.is_authenticated
         ):
             return _error_response(
