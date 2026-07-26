@@ -10,11 +10,14 @@ credential must not be enough on its own.
 from __future__ import annotations
 
 import datetime
-from typing import ClassVar
+import json
+import unittest
+from typing import Any, ClassVar
+from unittest.mock import patch
 
 from asgiref.sync import sync_to_async
 from django.contrib.auth import get_user_model
-from django.test import override_settings
+from django.test import Client, override_settings
 from django.utils import timezone
 from InvenTree.unit_test import InvenTreeTestCase
 from mcp.server.fastmcp.exceptions import ToolError
@@ -23,15 +26,20 @@ from part.api import PartList
 from part.models import Part, PartCategory
 from part.serializers import PartSerializer
 from plugin import registry
+from stock.models import StockItem, StockLocation
+from users.models import ApiToken
 
 from . import context
 from .mcp_server import mcp
 from .proxy import call_view
 from .schema_introspection import paginated_schema, serializer_schema
-from .tools.categories import list_categories
+from .settings import get_plugin_setting
+from .tools._common import DEFAULT_LIMIT, MAX_LIMIT, build_query_params, clamp_limit
+from .tools.categories import get_category, list_categories
 from .tools.discovery import describe_filters
+from .tools.locations import get_location, list_locations
 from .tools.parts import get_part, list_parts
-from .tools.stock import list_stock_items
+from .tools.stock import get_stock_item, list_stock_items
 
 
 @override_settings(PLUGIN_TESTING_SETUP=True)
@@ -55,6 +63,12 @@ class MCPToolPermissionTest(InvenTreeTestCase):
         )
         cls.part = Part.objects.create(
             name="Test Part", description="A part for MCP tests", category=cls.category
+        )
+        cls.location = StockLocation.objects.create(
+            name="Test Location", description="A location for MCP tests"
+        )
+        cls.stock_item = StockItem.objects.create(
+            part=cls.part, quantity=10, location=cls.location
         )
 
         # A second user, deliberately given no roles at all.
@@ -142,6 +156,47 @@ class MCPToolPermissionTest(InvenTreeTestCase):
 
         with self.assertRaises(ToolError):
             await list_stock_items()
+
+    async def test_authorized_user_can_get_category(self):
+        self._as(self.user)
+        result = await get_category(self.category.pk)
+        self.assertEqual(result["name"], "Widgets")
+
+    async def test_authorized_user_can_list_and_get_stock_items(self):
+        self._as(self.user)
+
+        listed = await list_stock_items(part=self.part.pk)
+        ids = [s["pk"] for s in listed["results"]]
+        self.assertIn(self.stock_item.pk, ids)
+
+        detail = await get_stock_item(self.stock_item.pk)
+        self.assertEqual(detail["part"], self.part.pk)
+
+    async def test_authorized_user_can_list_and_get_locations(self):
+        self._as(self.user)
+
+        listed = await list_locations(search="Test Location")
+        names = [location["name"] for location in listed["results"]]
+        self.assertIn("Test Location", names)
+
+        detail = await get_location(self.location.pk)
+        self.assertEqual(detail["name"], "Test Location")
+
+    async def test_unauthorized_user_cannot_get_category_stock_or_location(self):
+        """Denial coverage for the detail/get tools, not just the list ones above."""
+        self._as(self.no_access_user)
+
+        with self.assertRaises(ToolError):
+            await get_category(self.category.pk)
+
+        with self.assertRaises(ToolError):
+            await get_stock_item(self.stock_item.pk)
+
+        with self.assertRaises(ToolError):
+            await list_locations()
+
+        with self.assertRaises(ToolError):
+            await get_location(self.location.pk)
 
     async def test_no_bound_user_fails_closed(self):
         """Calling a tool with no bound user (e.g. outside of a real MCP request) must fail."""
@@ -305,3 +360,200 @@ class DescribeFiltersTest(InvenTreeTestCase):
     def test_describe_filters_rejects_unknown_resource(self):
         with self.assertRaises(ToolError):
             describe_filters("not-a-real-resource")
+
+
+@override_settings(PLUGIN_TESTING_SETUP=True)
+class MCPTransportTest(InvenTreeTestCase):
+    """HTTP-level regression tests for mcp_transport.py.
+
+    Everything here was originally verified by hand (curl + the real mcp
+    client SDK) while tracking down three separate bugs - see AGENTS.md's
+    OAuth2 section (auth_exempt requirement, SessionAuthentication/CSRF
+    interaction, request.body caching). None of that was a repeatable
+    regression test until now - all the other tests in this file call tool
+    functions directly and never touch MCPView.dispatch() at all.
+
+    Must use Client(enforce_csrf_checks=True): Django's test Client disables
+    CSRF checking entirely by default, which would silently mask the
+    SessionAuthentication/CSRF bug this class specifically guards against
+    (confirmed the hard way during development - the default Client made a
+    since-fixed regression look like it was passing).
+    """
+
+    URL = "/plugin/inventree-mcp/mcp/"
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+
+        cls.api_token = ApiToken.objects.create(
+            user=cls.user, name="transport-test-token"
+        ).key
+
+        app, _ = Application.objects.get_or_create(
+            name="mcp-transport-test-app",
+            defaults={
+                "client_type": "confidential",
+                "authorization_grant_type": "client-credentials",
+                "user": cls.user,
+            },
+        )
+        cls.oauth2_token = AccessToken.objects.create(
+            user=cls.user,
+            application=app,
+            token="mcp-transport-test-token",
+            expires=timezone.now() + datetime.timedelta(hours=1),
+            scope="g:read",
+        ).token
+
+        registry.reload_plugins(full_reload=True, collect=True)
+        registry.set_plugin_state("inventree-mcp", True)
+
+    @staticmethod
+    def _initialize_body() -> str:
+        return json.dumps({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-06-18",
+                "capabilities": {},
+                "clientInfo": {"name": "test", "version": "0.1"},
+            },
+        })
+
+    def _post(self, client: Client | None = None, **headers) -> Any:
+        client = client or Client(enforce_csrf_checks=True)
+        return client.post(
+            self.URL,
+            data=self._initialize_body(),
+            content_type="application/json",
+            HTTP_ACCEPT="application/json, text/event-stream",
+            **headers,
+        )
+
+    def test_unauthenticated_request_rejected_by_default(self):
+        """REQUIRE_AUTH defaults to True - no credential must be cleanly rejected, not crash."""
+        response = self._post()
+
+        self.assertEqual(response.status_code, 401)
+        self.assertIn("error", json.loads(response.content))
+
+    def test_invalid_credential_rejected(self):
+        """A malformed/unknown token must be rejected cleanly, not crash the view."""
+        response = self._post(HTTP_AUTHORIZATION="Token not-a-real-token")
+
+        self.assertEqual(response.status_code, 401)
+
+    def test_session_only_auth_is_rejected(self):
+        """SessionAuthentication is deliberately excluded (see AGENTS.md) - a logged-in
+        browser session alone, with no Token/Basic/OAuth2 credential, must not
+        authenticate this endpoint.
+        """
+        client = Client(enforce_csrf_checks=True)
+        client.login(username=self.username, password=self.password)
+
+        response = self._post(client=client)
+
+        self.assertEqual(response.status_code, 401)
+
+    def test_api_token_auth_succeeds(self):
+        response = self._post(HTTP_AUTHORIZATION=f"Token {self.api_token}")
+
+        self.assertEqual(response.status_code, 200)
+        body = json.loads(response.content)
+        self.assertEqual(body["result"]["serverInfo"]["name"], "InvenTree MCP")
+
+    def test_oauth2_bearer_auth_succeeds(self):
+        """Regression guard for three separate bugs at once - see class docstring.
+
+        Any one of them regressing changes this specific outcome:
+        - auth_exempt missing -> 401 before dispatch() ever runs.
+        - SessionAuthentication not excluded -> 403 "CSRF Failed: CSRF cookie not set."
+        - request.body not cached before initialize_request() -> 500 RawPostDataException.
+        """
+        response = self._post(HTTP_AUTHORIZATION=f"Bearer {self.oauth2_token}")
+
+        self.assertEqual(response.status_code, 200)
+        body = json.loads(response.content)
+        self.assertEqual(body["result"]["serverInfo"]["name"], "InvenTree MCP")
+
+
+class PluginSettingsTest(InvenTreeTestCase):
+    """Verify get_plugin_setting() fails safe - both REQUIRE_AUTH and MCP_READ_ONLY
+    depend on this for their fail-*closed* (i.e. restrictive) behaviour, so "can't
+    resolve the setting" must never quietly mean "unrestricted".
+    """
+
+    def test_returns_default_when_plugin_unresolvable(self):
+        with patch("inventree_mcp.settings._get_plugin_instance", return_value=None):
+            self.assertTrue(get_plugin_setting("REQUIRE_AUTH"))
+            self.assertTrue(get_plugin_setting("MCP_READ_ONLY"))
+            # The default parameter itself must be respected, not hardcoded True.
+            self.assertFalse(get_plugin_setting("REQUIRE_AUTH", default=False))
+
+    def test_returns_default_when_setting_lookup_raises(self):
+        class _BrokenPlugin:
+            def get_setting(self, key):
+                raise RuntimeError("simulated failure")
+
+        with patch(
+            "inventree_mcp.settings._get_plugin_instance",
+            return_value=_BrokenPlugin(),
+        ):
+            self.assertTrue(get_plugin_setting("REQUIRE_AUTH"))
+
+    def test_returns_real_value_when_plugin_resolvable(self):
+        with patch("inventree_mcp.settings._get_plugin_instance") as mock_get:
+            mock_get.return_value.get_setting.return_value = False
+            self.assertFalse(get_plugin_setting("MCP_READ_ONLY"))
+
+
+class ClampLimitTest(unittest.TestCase):
+    """Direct unit tests for the pagination cap every list tool relies on.
+
+    Exercised indirectly elsewhere (e.g. test_filters_cannot_bypass_limit_clamp
+    above), but the boundary values themselves weren't asserted directly.
+    """
+
+    def test_non_positive_values_fall_back_to_default(self):
+        self.assertEqual(clamp_limit(0), DEFAULT_LIMIT)
+        self.assertEqual(clamp_limit(-5), DEFAULT_LIMIT)
+
+    def test_values_within_range_pass_through_unchanged(self):
+        self.assertEqual(clamp_limit(1), 1)
+        self.assertEqual(clamp_limit(50), 50)
+        self.assertEqual(clamp_limit(MAX_LIMIT), MAX_LIMIT)
+
+    def test_values_above_max_are_capped(self):
+        self.assertEqual(clamp_limit(MAX_LIMIT + 1), MAX_LIMIT)
+        self.assertEqual(clamp_limit(10_000), MAX_LIMIT)
+
+
+class BuildQueryParamsTest(unittest.TestCase):
+    """Direct unit tests for the filters/limit/offset merge order.
+
+    test_filters_cannot_bypass_limit_clamp (above) already covers this via a
+    real tool call; this asserts the merge order itself in isolation.
+    """
+
+    def test_filters_merge_over_base(self):
+        params = build_query_params(
+            {"search": "x"}, {"active": True}, limit=10, offset=0
+        )
+
+        self.assertEqual(params["search"], "x")
+        self.assertTrue(params["active"])
+
+    def test_filters_cannot_override_pagination(self):
+        params = build_query_params(
+            {}, {"limit": 99_999, "offset": 500}, limit=10, offset=0
+        )
+
+        self.assertEqual(params["limit"], 10)
+        self.assertEqual(params["offset"], 0)
+
+    def test_none_filters_is_safe(self):
+        params = build_query_params({"a": 1}, None, limit=5, offset=0)
+
+        self.assertEqual(params, {"a": 1, "limit": 5, "offset": 0})

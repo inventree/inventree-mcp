@@ -237,6 +237,27 @@ then read `.key` off the created row) and drive the endpoint with the real `mcp`
 JSON-RPC - the Streamable HTTP framing is easy to get subtly wrong by hand. Delete the token
 afterwards.
 
+### What's covered where
+
+Most tests call tool functions directly (`await list_parts(...)`) with a user bound via
+`context.set_current_user()` - fast, but bypasses `MCPView.dispatch()` entirely. Two things
+specifically need HTTP-level tests instead, in `MCPTransportTest`:
+
+- Anything about `dispatch()` itself - auth resolution, the `REQUIRE_AUTH` gate, exception
+  handling. Calling tool functions directly never touches this code at all.
+- The three OAuth2 transport bugs from the section above (`auth_exempt`, `SessionAuthentication`
+  exclusion, body caching) - these only reproduce over a request that goes through Django's real
+  middleware stack with CSRF enforcement genuinely active. `MCPTransportTest` uses
+  `Client(enforce_csrf_checks=True)` for exactly this reason - the default `Client()` disables CSRF
+  checking entirely and would silently pass even with `SessionAuthentication` back in the
+  authenticator list. If you touch `mcp_transport.py`'s auth handling, re-run
+  `MCPTransportTest.test_oauth2_bearer_auth_succeeds` specifically (or retest live) - it's the one
+  test that fails if any of the three fixes regress.
+
+Everything else (`schema_introspection.py`, `filter_introspection.py`, `_common.py`) has direct
+unit tests alongside the integration-style ones, since they're pure functions with no Django
+request/DB dependency worth paying `InvenTreeTestCase`'s setup cost for.
+
 ## Lint/format
 
 ```
