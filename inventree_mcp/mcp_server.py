@@ -28,6 +28,15 @@ mcp = FastMCP(
 # Must run after the tool imports above - it attaches output schemas to
 # already-registered tools. See output_schemas.py.
 from . import output_schemas
-from .tools import categories, discovery, locations, parts, stock  # noqa: F401
+from .tools import (  # noqa: F401
+    build_orders,
+    categories,
+    discovery,
+    locations,
+    parts,
+    purchase_orders,
+    sales_orders,
+    stock,
+)
 
 output_schemas.apply()
