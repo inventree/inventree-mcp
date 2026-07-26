@@ -84,7 +84,15 @@ def _field_schema(field: drf.Field, depth: int = 0) -> dict[str, Any]:
             result = dict(schema)
             break
 
-    if getattr(field, "allow_null", False) and isinstance(result.get("type"), str):
+    # DRF's `allow_null` governs *input* validation, not what to_representation()
+    # can actually emit - a CharField with allow_null=False will still output
+    # None if its underlying model column is null=True (confirmed the hard way:
+    # PartSerializer.IPN has allow_null=False but Part.IPN is a nullable
+    # CharField, and real data with a null IPN broke every list_parts call once
+    # more than one page of real parts was fetched through the real MCP
+    # transport - see AGENTS.md's output schema section). Trusting allow_null
+    # here isn't safe, so every concrete type is nullable unconditionally.
+    if isinstance(result.get("type"), str):
         result["type"] = [result["type"], "null"]
 
     return result
