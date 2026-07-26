@@ -206,10 +206,27 @@ because they're set last. Don't reorder that without re-adding the equivalent pr
 ## Testing
 
 ```
-# from the main InvenTree checkout, with dev/InvenTreeMCP installed editable:
+# from this repo, inside the InvenTree devcontainer:
+./run_tests.sh                                            # full suite, --keepdb
+./run_tests.sh inventree_mcp.test_mcp.MCPTransportTest     # one class
+```
+
+`run_tests.sh` installs this plugin editable into the devcontainer's InvenTree venv, sets
+`INVENTREE_PLUGINS_MANDATORY=inventree-mcp` (activates it without needing the
+`PLUGIN_TESTING_SETUP` dance below - CI uses the same env var), and runs InvenTree's own
+`manage.py test`. Equivalent by hand:
+
+```
 pip install -e dev/InvenTreeMCP --no-deps
 invoke dev.test -r inventree_mcp.test_mcp.MCPToolPermissionTest
 ```
+
+CI (`.github/workflows/ci.yaml`, copied from `inventree-stock-forecasting`'s pattern - same
+scaffold origin) runs `ruff check` + a build check, then a matrix job against the real
+`inventree/inventree:stable` and `:latest` Docker images with a Postgres service, installing this
+plugin editable and running `manage.py test inventree_mcp.test_mcp` inside the container. Runs on
+push/PR to `main` plus a weekly cron, specifically to catch upstream InvenTree breakage between
+manual test runs.
 
 Tests are `async def` methods on an `InvenTreeTestCase` subclass (Django 5.2 runs async test
 methods natively). The point of `test_mcp.py` is permission enforcement: a user with the relevant
