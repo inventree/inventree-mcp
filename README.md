@@ -14,10 +14,11 @@ than they could via the normal API. Tool code must never query the Django ORM di
 tools by wrapping an existing (or new) API view, not by reimplementing queries.
 
 Currently read-only: parts, stock items, stock locations, part categories, purchase orders, sales
-orders, and build orders (each with list + detail, plus line items, and - for sales/build orders -
-stock allocations). No write tools are implemented yet - and when they are, the `MCP_READ_ONLY`
-setting (see Configuration below) blocks any write action by default regardless of the calling
-user's permissions, as a second layer on top of per-user roles.
+orders, build orders (each with list + detail, plus line items, and - for sales/build orders -
+stock allocations), companies, contacts, addresses, manufacturer parts, and supplier parts. No
+write tools are implemented yet - and when they are, the `MCP_READ_ONLY` setting (see
+Configuration below) blocks any write action by default regardless of the calling user's
+permissions, as a second layer on top of per-user roles.
 
 Each `outputSchema` is generated from the real InvenTree serializer (not hand-maintained), so it
 can't drift from the actual API shape as InvenTree evolves. Each list tool also takes a `filters`

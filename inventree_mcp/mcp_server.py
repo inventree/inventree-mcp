@@ -31,12 +31,14 @@ from . import output_schemas
 from .tools import (  # noqa: F401
     build_orders,
     categories,
+    companies,
     discovery,
     locations,
     parts,
     purchase_orders,
     sales_orders,
     stock,
+    supplier_parts,
 )
 
 output_schemas.apply()

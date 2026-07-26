@@ -80,6 +80,36 @@ def _build_item_list() -> type:
     return BuildItemList
 
 
+def _company_list() -> type:
+    from company.api import CompanyList
+
+    return CompanyList
+
+
+def _contact_list() -> type:
+    from company.api import ContactList
+
+    return ContactList
+
+
+def _address_list() -> type:
+    from company.api import AddressList
+
+    return AddressList
+
+
+def _manufacturer_part_list() -> type:
+    from company.api import ManufacturerPartList
+
+    return ManufacturerPartList
+
+
+def _supplier_part_list() -> type:
+    from company.api import SupplierPartList
+
+    return SupplierPartList
+
+
 # Values are loader functions, not the view classes directly, so each import
 # stays lazy (matches tools/*.py's own per-call imports) - importing e.g.
 # part.api at module level risks AppRegistryNotReady if InvenTree's plugin
@@ -97,6 +127,11 @@ _RESOURCE_LOADERS = {
     "build_order": _build_order_list,
     "build_line": _build_line_list,
     "build_item": _build_item_list,
+    "company": _company_list,
+    "contact": _contact_list,
+    "address": _address_list,
+    "manufacturer_part": _manufacturer_part_list,
+    "supplier_part": _supplier_part_list,
 }
 
 
@@ -112,11 +147,15 @@ def describe_filters(resource: str) -> dict:
         resource: one of "part", "stock", "location", "category",
             "purchase_order", "purchase_order_line", "sales_order",
             "sales_order_line", "sales_order_allocation", "build_order",
-            "build_line", "build_item" - matches list_parts / list_stock_items
-            / list_locations / list_categories / list_purchase_orders /
-            list_purchase_order_lines / list_sales_orders /
-            list_sales_order_lines / list_sales_order_allocations /
-            list_build_orders / list_build_lines / list_build_items.
+            "build_line", "build_item", "company", "contact", "address",
+            "manufacturer_part", "supplier_part" - matches list_parts /
+            list_stock_items / list_locations / list_categories /
+            list_purchase_orders / list_purchase_order_lines /
+            list_sales_orders / list_sales_order_lines /
+            list_sales_order_allocations / list_build_orders /
+            list_build_lines / list_build_items / list_companies /
+            list_contacts / list_addresses / list_manufacturer_parts /
+            list_supplier_parts.
 
     Returns a dict with:
         search_fields: fields matched by that list tool's `search` argument.

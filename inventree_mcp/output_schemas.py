@@ -33,6 +33,13 @@ from __future__ import annotations
 from typing import Any
 
 from build.serializers import BuildItemSerializer, BuildLineSerializer, BuildSerializer
+from company.serializers import (
+    AddressSerializer,
+    CompanySerializer,
+    ContactSerializer,
+    ManufacturerPartSerializer,
+    SupplierPartSerializer,
+)
 from order.serializers import (
     PurchaseOrderLineItemSerializer,
     PurchaseOrderSerializer,
@@ -74,6 +81,16 @@ _OUTPUT_SCHEMAS = {
     "get_build_line": serializer_schema(BuildLineSerializer),
     "list_build_items": paginated_schema(BuildItemSerializer),
     "get_build_item": serializer_schema(BuildItemSerializer),
+    "list_companies": paginated_schema(CompanySerializer),
+    "get_company": serializer_schema(CompanySerializer),
+    "list_contacts": paginated_schema(ContactSerializer),
+    "get_contact": serializer_schema(ContactSerializer),
+    "list_addresses": paginated_schema(AddressSerializer),
+    "get_address": serializer_schema(AddressSerializer),
+    "list_manufacturer_parts": paginated_schema(ManufacturerPartSerializer),
+    "get_manufacturer_part": serializer_schema(ManufacturerPartSerializer),
+    "list_supplier_parts": paginated_schema(SupplierPartSerializer),
+    "get_supplier_part": serializer_schema(SupplierPartSerializer),
 }
 
 
