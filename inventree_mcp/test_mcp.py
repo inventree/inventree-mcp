@@ -21,10 +21,13 @@ from mcp.server.fastmcp.exceptions import ToolError
 from oauth2_provider.models import AccessToken, Application
 from part.api import PartList
 from part.models import Part, PartCategory
+from part.serializers import PartSerializer
 from plugin import registry
 
 from . import context
+from .mcp_server import mcp
 from .proxy import call_view
+from .schema_introspection import paginated_schema, serializer_schema
 from .tools.categories import list_categories
 from .tools.parts import get_part, list_parts
 from .tools.stock import list_stock_items
@@ -204,3 +207,64 @@ class MCPToolPermissionTest(InvenTreeTestCase):
         result = await list_parts(search="Test Part")
         names = [p["name"] for p in result["results"]]
         self.assertIn("Test Part", names)
+
+
+class OutputSchemaTest(InvenTreeTestCase):
+    """Verify tool output schemas are derived from the real serializers, not left blank.
+
+    Without output_schemas.apply(), FastMCP can't derive a schema from our
+    tools' `-> dict` return annotation and reports outputSchema: null - see
+    schema_introspection.py / output_schemas.py for why and how.
+    """
+
+    roles: ClassVar[list[str]] = ["part.view"]
+
+    def test_serializer_schema_maps_common_field_types(self):
+        schema = serializer_schema(PartSerializer)
+        props = schema["properties"]
+
+        self.assertEqual(props["active"]["type"], "boolean")
+        self.assertEqual(props["description"]["type"], "string")
+        # 'category' is a nullable FK -> integer-or-null, not just integer.
+        self.assertEqual(props["category"]["type"], ["integer", "null"])
+
+    def test_paginated_schema_wraps_results_array(self):
+        schema = paginated_schema(PartSerializer)
+
+        self.assertEqual(schema["properties"]["results"]["type"], "array")
+        self.assertEqual(
+            schema["properties"]["results"]["items"]["title"], "PartSerializer"
+        )
+        self.assertEqual(schema["required"], ["count", "next", "previous", "results"])
+
+    async def test_registered_tools_report_output_schemas(self):
+        """The live tool registry (as a real MCP client would see via tools/list) must have these attached."""
+        tools = {tool.name: tool for tool in await mcp.list_tools()}
+
+        self.assertIsNotNone(tools["list_parts"].outputSchema)
+        self.assertIn("results", tools["list_parts"].outputSchema["properties"])
+
+        self.assertIsNotNone(tools["get_part"].outputSchema)
+        self.assertIn("name", tools["get_part"].outputSchema["properties"])
+
+    async def test_call_tool_still_returns_real_data(self):
+        """Regression test: declaring output_schema without a matching output_model breaks every real call.
+
+        mcp.list_tools() (tested above) only exercises tool *listing* -
+        FastMCP separately validates every actual result against
+        fn_metadata.output_model when a tool is *called*
+        (func_metadata.py's convert_result()), and raises
+        "Output model must be set if output schema is defined" if a schema
+        was attached with no model. Must go through mcp.call_tool() (not
+        call the Python function directly) to exercise that path.
+        """
+        context.set_current_user(self.user)
+        self.addCleanup(context.set_current_user, None)
+
+        result = await mcp.call_tool("list_parts", {"limit": 1})
+
+        # call_tool() returns (content_blocks, structured_content) once an
+        # output_model is attached.
+        self.assertIsInstance(result, tuple)
+        _content, structured = result
+        self.assertIn("results", structured)

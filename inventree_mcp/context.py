@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from django.contrib.auth.models import AbstractUser
@@ -24,16 +24,16 @@ class _Identity:
     # OAuth2-authenticated - None for token/basic/session auth. Propagated so
     # proxy.call_view() can make the proxied view see the token's *actual*
     # granted scopes, not just the user's role permissions. See proxy.py.
-    oauth2_token: Optional[Any] = None
+    oauth2_token: Any | None = None
 
 
-_current_identity: ContextVar[Optional[_Identity]] = ContextVar(
+_current_identity: ContextVar[_Identity | None] = ContextVar(
     "inventree_mcp_current_identity", default=None
 )
 
 
 def set_current_user(
-    user: Optional[AbstractUser], oauth2_token: Optional[Any] = None
+    user: AbstractUser | None, oauth2_token: Any | None = None
 ) -> Token:
     """Bind *user* (and, if OAuth2-authenticated, the real access token) for this context."""
     identity = _Identity(user, oauth2_token) if user is not None else None
@@ -60,7 +60,7 @@ def get_current_user() -> AbstractUser:
     return identity.user
 
 
-def get_current_oauth2_token() -> Optional[Any]:
+def get_current_oauth2_token() -> Any | None:
     """Return the real OAuth2 access token for the current MCP request, if any."""
     identity = _current_identity.get()
     return identity.oauth2_token if identity else None

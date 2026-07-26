@@ -42,6 +42,8 @@ and don't bypass `call_view()` for a "just this once" write.
   would otherwise break OAuth2 scope enforcement entirely. See the OAuth2 section below.
 - `tools/` - one module per resource (`parts.py`, `stock.py`, `locations.py`, `categories.py`),
   each a thin async wrapper around `call_view()`.
+- `schema_introspection.py` / `output_schemas.py` - derive each tool's MCP `outputSchema` from the
+  real DRF serializer instead of hand-maintaining one. See the output schema section below.
 - `core.py` - the `InvenTreePlugin` subclass (`UrlsMixin` + `SettingsMixin`), `REQUIRE_AUTH` and
   `MCP_READ_ONLY` settings.
 
@@ -138,6 +140,40 @@ retest with real curl + the real `mcp` client SDK, not just `invoke dev.test`.
 
    Remove the `oauth2_bridge.py` workarounds if/when the two core bugs are fixed upstream (they
    should ideally be reported/fixed in InvenTree itself, not permanently patched around here).
+
+## Output schemas (read this before touching schema_introspection.py or output_schemas.py)
+
+Every tool's Python return type is a bare `dict` (the real shape comes from whatever InvenTree
+serializer backs it), so FastMCP's default `outputSchema` derivation - which only works from a
+meaningfully-typed return annotation - produces nothing. `schema_introspection.py` builds a JSON
+Schema directly from the real serializer's fields (best-effort field-type mapping, not exhaustive:
+things like `SerializerMethodField`/`ReadOnlyField` fall back to an unconstrained `{}` rather than
+guessing wrong). `output_schemas.apply()` (called once from `mcp_server.py`, after the tool imports)
+attaches the computed schema to each already-registered `Tool`.
+
+Two things about *how* it attaches that are easy to get wrong:
+
+- There's no public FastMCP API for supplying a custom output schema - `@mcp.tool()` /
+  `mcp.add_tool()` only take a `structured_output` bool. This reaches into
+  `mcp._tool_manager.get_tool(name)` and sets `tool.fn_metadata.output_schema` directly.
+  `Tool.output_schema` is a `@cached_property` reading from `fn_metadata`, so this only works
+  because `apply()` runs at import time, before any real request could have triggered that cache -
+  don't move this call to run lazily/later without re-checking that.
+- **`fn_metadata.output_model` must be set alongside `output_schema`, not left `None`.**
+  `output_schema` only controls what's *declared* in `tools/list`; FastMCP separately validates
+  every actual result against `output_model` when a tool is *called*
+  (`func_metadata.py`'s `convert_result()`), and asserts if a schema exists with no model - every
+  real tool call raised `"Output model must be set if output schema is defined"` until this was
+  fixed. Deliberately use a fully permissive `pydantic.RootModel[dict[str, Any]]` here rather than
+  a model matching the inferred schema field-for-field: `schema_introspection`'s mapping is
+  best-effort, and validating real InvenTree responses against our own possibly-imperfect guess
+  could reject genuinely correct data. Declared schema (informative) and runtime validation model
+  (permissive, never rejects real data) are deliberately different things.
+
+This bug class only reproduces through `mcp.call_tool()` / a real MCP client call - `mcp.list_tools()`
+alone won't catch it (schema declaration succeeds fine; only the *call* path breaks). Test both -
+see `OutputSchemaTest` in `test_mcp.py` for the pattern (`test_call_tool_still_returns_real_data`
+specifically exists to catch a regression here).
 
 ## Testing
 

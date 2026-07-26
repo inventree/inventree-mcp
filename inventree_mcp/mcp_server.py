@@ -25,4 +25,9 @@ mcp = FastMCP(
 )
 
 # Import tool modules for their side effect of registering @mcp.tool() functions.
+# Must run after the tool imports above - it attaches output schemas to
+# already-registered tools. See output_schemas.py.
+from . import output_schemas  # noqa: E402
 from .tools import categories, locations, parts, stock  # noqa: E402, F401
+
+output_schemas.apply()
