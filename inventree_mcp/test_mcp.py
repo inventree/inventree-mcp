@@ -17,7 +17,7 @@ from unittest.mock import patch
 
 from asgiref.sync import sync_to_async
 from build.models import Build, BuildItem
-from company.models import Company, SupplierPart
+from company.models import Address, Company, Contact, ManufacturerPart, SupplierPart
 from django.contrib.auth import get_user_model
 from django.test import Client, override_settings
 from django.utils import timezone
@@ -54,6 +54,14 @@ from .tools.build_orders import (
     list_build_orders,
 )
 from .tools.categories import get_category, list_categories
+from .tools.companies import (
+    get_address,
+    get_company,
+    get_contact,
+    list_addresses,
+    list_companies,
+    list_contacts,
+)
 from .tools.discovery import describe_filters
 from .tools.locations import get_location, list_locations
 from .tools.parts import get_part, list_parts
@@ -72,6 +80,12 @@ from .tools.sales_orders import (
     list_sales_orders,
 )
 from .tools.stock import get_stock_item, list_stock_items
+from .tools.supplier_parts import (
+    get_manufacturer_part,
+    get_supplier_part,
+    list_manufacturer_parts,
+    list_supplier_parts,
+)
 
 
 @override_settings(PLUGIN_TESTING_SETUP=True)
@@ -122,6 +136,20 @@ class MCPToolPermissionTest(InvenTreeTestCase):
         )
         cls.po_line = PurchaseOrderLineItem.objects.create(
             part=cls.supplier_part, order=cls.purchase_order, quantity=50
+        )
+
+        # --- Company/contact/address/manufacturer part fixtures ---
+        cls.contact = Contact.objects.create(
+            company=cls.supplier, name="Test Contact", email="contact@example.org"
+        )
+        cls.address = Address.objects.create(
+            company=cls.supplier, title="Test Address", line1="1 Test Street"
+        )
+        cls.manufacturer = Company.objects.create(
+            name="Test Manufacturer", is_manufacturer=True
+        )
+        cls.manufacturer_part = ManufacturerPart.objects.create(
+            part=cls.part, manufacturer=cls.manufacturer, MPN="MCP-TEST-MPN"
         )
 
         # --- Sales order fixtures ---
@@ -525,6 +553,80 @@ class MCPToolPermissionTest(InvenTreeTestCase):
         with self.assertRaises(ToolError):
             await get_build_item(self.build_item.pk)
 
+    async def test_authorized_user_can_list_and_get_companies(self):
+        self._as(self.user)
+
+        listed = await list_companies(is_supplier=True)
+        names = [c["name"] for c in listed["results"]]
+        self.assertIn("Test Supplier", names)
+
+        detail = await get_company(self.supplier.pk)
+        self.assertEqual(detail["name"], "Test Supplier")
+
+    async def test_authorized_user_can_list_and_get_contacts(self):
+        self._as(self.user)
+
+        listed = await list_contacts(company=self.supplier.pk)
+        ids = [c["pk"] for c in listed["results"]]
+        self.assertIn(self.contact.pk, ids)
+
+        detail = await get_contact(self.contact.pk)
+        self.assertEqual(detail["name"], "Test Contact")
+
+    async def test_authorized_user_can_list_and_get_addresses(self):
+        self._as(self.user)
+
+        listed = await list_addresses(company=self.supplier.pk)
+        ids = [a["pk"] for a in listed["results"]]
+        self.assertIn(self.address.pk, ids)
+
+        detail = await get_address(self.address.pk)
+        self.assertEqual(detail["title"], "Test Address")
+
+    async def test_authorized_user_can_list_and_get_manufacturer_parts(self):
+        self._as(self.user)
+
+        listed = await list_manufacturer_parts(part=self.part.pk)
+        ids = [mp["pk"] for mp in listed["results"]]
+        self.assertIn(self.manufacturer_part.pk, ids)
+
+        detail = await get_manufacturer_part(self.manufacturer_part.pk)
+        self.assertEqual(detail["MPN"], "MCP-TEST-MPN")
+
+    async def test_authorized_user_can_list_and_get_supplier_parts(self):
+        self._as(self.user)
+
+        listed = await list_supplier_parts(supplier=self.supplier.pk)
+        ids = [sp["pk"] for sp in listed["results"]]
+        self.assertIn(self.supplier_part.pk, ids)
+
+        detail = await get_supplier_part(self.supplier_part.pk)
+        self.assertEqual(detail["SKU"], "MCP-TEST-SKU")
+
+    async def test_unauthorized_user_cannot_access_company_catalog_data(self):
+        self._as(self.no_access_user)
+
+        with self.assertRaises(ToolError):
+            await list_companies()
+        with self.assertRaises(ToolError):
+            await get_company(self.supplier.pk)
+        with self.assertRaises(ToolError):
+            await list_contacts()
+        with self.assertRaises(ToolError):
+            await get_contact(self.contact.pk)
+        with self.assertRaises(ToolError):
+            await list_addresses()
+        with self.assertRaises(ToolError):
+            await get_address(self.address.pk)
+        with self.assertRaises(ToolError):
+            await list_manufacturer_parts()
+        with self.assertRaises(ToolError):
+            await get_manufacturer_part(self.manufacturer_part.pk)
+        with self.assertRaises(ToolError):
+            await list_supplier_parts()
+        with self.assertRaises(ToolError):
+            await get_supplier_part(self.supplier_part.pk)
+
 
 class OutputSchemaTest(InvenTreeTestCase):
     """Verify tool output schemas are derived from the real serializers, not left blank.
@@ -566,6 +668,8 @@ class OutputSchemaTest(InvenTreeTestCase):
 
         self.assertIsNotNone(tools["list_purchase_orders"].outputSchema)
         self.assertIsNotNone(tools["get_build_item"].outputSchema)
+        self.assertIsNotNone(tools["list_companies"].outputSchema)
+        self.assertIsNotNone(tools["get_supplier_part"].outputSchema)
 
     async def test_every_registered_tool_has_an_output_schema(self):
         """Guard against a new tool being added without a matching entry in output_schemas.py."""
@@ -633,6 +737,34 @@ class DescribeFiltersTest(InvenTreeTestCase):
         self.assertIn("outstanding", describe_filters("purchase_order")["filters"])
         self.assertIn("allocated", describe_filters("sales_order_line")["filters"])
         self.assertIn("build", describe_filters("build_line")["filters"])
+
+    def test_describe_filters_covers_company_catalog_resources(self):
+        for resource in (
+            "company",
+            "contact",
+            "address",
+            "manufacturer_part",
+            "supplier_part",
+        ):
+            result = describe_filters(resource)
+            self.assertTrue(result["filters"])
+
+        self.assertIn("is_supplier", describe_filters("company")["filters"])
+        self.assertIn("has_stock", describe_filters("supplier_part")["filters"])
+
+    def test_describe_filters_covers_filterset_fields_shorthand(self):
+        """Contact/AddressList use DRF's filterset_fields shorthand, not a full
+        filterset_class - regression test for the model-field fallback in
+        filter_introspection.py's _model_field_filters().
+        """
+        self.assertEqual(
+            describe_filters("contact")["filters"],
+            {"company": {"type": "integer (id)"}},
+        )
+        self.assertEqual(
+            describe_filters("address")["filters"],
+            {"company": {"type": "integer (id)"}},
+        )
 
     def test_describe_filters_rejects_unknown_resource(self):
         with self.assertRaises(ToolError):
