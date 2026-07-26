@@ -29,6 +29,7 @@ from .mcp_server import mcp
 from .proxy import call_view
 from .schema_introspection import paginated_schema, serializer_schema
 from .tools.categories import list_categories
+from .tools.discovery import describe_filters
 from .tools.parts import get_part, list_parts
 from .tools.stock import list_stock_items
 
@@ -153,6 +154,23 @@ class MCPToolPermissionTest(InvenTreeTestCase):
         result = await list_parts(limit=10_000)
         self.assertLessEqual(len(result["results"]), 100)
 
+    async def test_filters_dict_reaches_the_real_view(self):
+        """The generic `filters` argument must actually apply against the real API, not be ignored."""
+        self._as(self.user)
+
+        active = await list_parts(search="Test Part", filters={"active": True})
+        self.assertIn("Test Part", [p["name"] for p in active["results"]])
+
+        inactive_only = await list_parts(search="Test Part", filters={"active": False})
+        self.assertNotIn("Test Part", [p["name"] for p in inactive_only["results"]])
+
+    async def test_filters_cannot_bypass_limit_clamp(self):
+        """filters={"limit": ...} must not override clamp_limit()'s pagination cap."""
+        self._as(self.user)
+
+        result = await list_parts(filters={"limit": 10_000})
+        self.assertLessEqual(len(result["results"]), 100)
+
     async def test_read_only_setting_blocks_writes_by_default(self):
         """Even a fully-permissioned user cannot write while MCP_READ_ONLY is on (the default)."""
         self._as(self.user)
@@ -268,3 +286,22 @@ class OutputSchemaTest(InvenTreeTestCase):
         self.assertIsInstance(result, tuple)
         _content, structured = result
         self.assertIn("results", structured)
+
+
+class DescribeFiltersTest(InvenTreeTestCase):
+    """Verify describe_filters() reflects the real, live FilterSet definitions.
+
+    No DB access or bound user needed - this is pure metadata introspection,
+    same as the schema_introspection tests above.
+    """
+
+    def test_describe_filters_reflects_real_filterset(self):
+        result = describe_filters("part")
+
+        self.assertIn("name", result["search_fields"])
+        self.assertIn("is_variant", result["filters"])
+        self.assertEqual(result["filters"]["is_variant"]["type"], "boolean")
+
+    def test_describe_filters_rejects_unknown_resource(self):
+        with self.assertRaises(ToolError):
+            describe_filters("not-a-real-resource")

@@ -41,9 +41,14 @@ and don't bypass `call_view()` for a "just this once" write.
   the proxied view (instead of a synthetic one), and works around two InvenTree core bugs that
   would otherwise break OAuth2 scope enforcement entirely. See the OAuth2 section below.
 - `tools/` - one module per resource (`parts.py`, `stock.py`, `locations.py`, `categories.py`),
-  each a thin async wrapper around `call_view()`.
+  each a thin async wrapper around `call_view()`; `discovery.py` holds `describe_filters()`, which
+  isn't tied to one resource.
 - `schema_introspection.py` / `output_schemas.py` - derive each tool's MCP `outputSchema` from the
   real DRF serializer instead of hand-maintaining one. See the output schema section below.
+- `filter_introspection.py` - same idea, for *input* filtering: `describe_filterset()` reads a
+  view's real `filterset_class`/`search_fields`/`ordering_fields` and backs both
+  `tools/discovery.py`'s `describe_filters()` tool and (indirectly) every list tool's `filters`
+  argument. See the filtering section below.
 - `core.py` - the `InvenTreePlugin` subclass (`UrlsMixin` + `SettingsMixin`), `REQUIRE_AUTH` and
   `MCP_READ_ONLY` settings.
 
@@ -174,6 +179,29 @@ This bug class only reproduces through `mcp.call_tool()` / a real MCP client cal
 alone won't catch it (schema declaration succeeds fine; only the *call* path breaks). Test both -
 see `OutputSchemaTest` in `test_mcp.py` for the pattern (`test_call_tool_still_returns_real_data`
 specifically exists to catch a regression here).
+
+## Filtering (read this before touching filter_introspection.py or a list tool's `filters` handling)
+
+Each list tool exposes a small, curated set of named parameters (`search`, `category`, `active`,
+...) for the common cases, plus a catch-all `filters: dict[str, Any] | None` for everything else -
+the real views support far more (`PartFilter` alone has 43 `django_filters` filters, none of which
+we'd want to hand-declare as named Python parameters and keep in sync by hand). `filters` is merged
+straight into the query params sent to `call_view()` (via `tools/_common.py`'s
+`build_query_params()`), so anything the real DRF view accepts as a query string works here too -
+no separate validation layer, whatever `call_view()` already does (permission checks, `MCP_READ_ONLY`,
+etc.) still applies identically.
+
+`tools/discovery.py`'s `describe_filters(resource)` is how an agent is meant to learn what's in
+`filters` - it returns `filter_introspection.describe_filterset()`'s output: every entry in the
+view's real `filterset_class.base_filters` (name, best-effort type, label, choices if any) plus
+`search_fields`/`ordering_fields`. Static metadata only, no DB access - safe to call regardless of
+role. Like `schema_introspection.py`, the type mapping is best-effort (ordered
+subclass-before-superclass, same reasoning as there) and not exhaustive.
+
+One guardrail worth knowing before changing `build_query_params()`: it applies `filters` *before*
+setting `limit`/`offset` from the named arguments, specifically so a caller can't pass
+`filters={"limit": 99999}` to bypass `clamp_limit()`'s pagination cap - our own values always win
+because they're set last. Don't reorder that without re-adding the equivalent protection.
 
 ## Testing
 

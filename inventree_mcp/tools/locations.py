@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from ..mcp_server import mcp
 from ..proxy import call_view
-from ._common import clamp_limit
+from ._common import build_query_params
 
 
 @mcp.tool()
 async def list_locations(
     search: str | None = None,
     parent: int | None = None,
+    filters: dict[str, Any] | None = None,
     limit: int = 25,
     offset: int = 0,
 ) -> dict:
@@ -19,17 +22,20 @@ async def list_locations(
     Args:
         search: free-text search against name/description.
         parent: restrict to direct children of this StockLocation ID.
+        filters: additional filter/ordering parameters beyond the named arguments
+            above - call describe_filters("location") to see what's available.
         limit: maximum number of results to return (capped at 100).
         offset: pagination offset.
     """
     from stock.api import StockLocationList
 
-    params: dict = {"limit": clamp_limit(limit), "offset": offset}
-
+    base: dict[str, Any] = {}
     if search is not None:
-        params["search"] = search
+        base["search"] = search
     if parent is not None:
-        params["parent"] = parent
+        base["parent"] = parent
+
+    params = build_query_params(base, filters, limit, offset)
 
     return await call_view(
         StockLocationList, "GET", "/api/stock/location/", query_params=params

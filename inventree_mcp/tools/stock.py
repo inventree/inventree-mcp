@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from ..mcp_server import mcp
 from ..proxy import call_view
-from ._common import clamp_limit
+from ._common import build_query_params
 
 
 @mcp.tool()
@@ -12,6 +14,7 @@ async def list_stock_items(
     part: int | None = None,
     location: int | None = None,
     in_stock: bool | None = None,
+    filters: dict[str, Any] | None = None,
     limit: int = 25,
     offset: int = 0,
 ) -> dict:
@@ -21,19 +24,23 @@ async def list_stock_items(
         part: restrict to stock of this Part ID (includes variants of the part).
         location: restrict to stock held at this StockLocation ID.
         in_stock: filter by whether the item currently counts as "in stock".
+        filters: additional filter/ordering parameters beyond the named arguments
+            above - call describe_filters("stock") to see what's available, e.g.
+            filters={"low_stock": true, "ordering": "-quantity"}.
         limit: maximum number of results to return (capped at 100).
         offset: pagination offset.
     """
     from stock.api import StockList
 
-    params: dict = {"limit": clamp_limit(limit), "offset": offset}
-
+    base: dict[str, Any] = {}
     if part is not None:
-        params["part"] = part
+        base["part"] = part
     if location is not None:
-        params["location"] = location
+        base["location"] = location
     if in_stock is not None:
-        params["in_stock"] = in_stock
+        base["in_stock"] = in_stock
+
+    params = build_query_params(base, filters, limit, offset)
 
     return await call_view(StockList, "GET", "/api/stock/", query_params=params)
 

@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from ..mcp_server import mcp
 from ..proxy import call_view
-from ._common import clamp_limit
+from ._common import build_query_params
 
 
 @mcp.tool()
 async def list_categories(
     search: str | None = None,
     parent: int | None = None,
+    filters: dict[str, Any] | None = None,
     limit: int = 25,
     offset: int = 0,
 ) -> dict:
@@ -19,17 +22,20 @@ async def list_categories(
     Args:
         search: free-text search against name/description.
         parent: restrict to direct children of this PartCategory ID.
+        filters: additional filter/ordering parameters beyond the named arguments
+            above - call describe_filters("category") to see what's available.
         limit: maximum number of results to return (capped at 100).
         offset: pagination offset.
     """
     from part.api import CategoryList
 
-    params: dict = {"limit": clamp_limit(limit), "offset": offset}
-
+    base: dict[str, Any] = {}
     if search is not None:
-        params["search"] = search
+        base["search"] = search
     if parent is not None:
-        params["parent"] = parent
+        base["parent"] = parent
+
+    params = build_query_params(base, filters, limit, offset)
 
     return await call_view(
         CategoryList, "GET", "/api/part/category/", query_params=params

@@ -18,6 +18,13 @@ No write tools are implemented yet - and when they are, the `MCP_READ_ONLY` sett
 Configuration below) blocks any write action by default regardless of the calling user's
 permissions, as a second layer on top of per-user roles.
 
+Each `outputSchema` is generated from the real InvenTree serializer (not hand-maintained), so it
+can't drift from the actual API shape as InvenTree evolves. Each list tool also takes a `filters`
+argument, merged directly into the real API's query parameters - call the `describe_filters` tool
+(e.g. `describe_filters("part")`) to see what's available for a given resource: every field
+InvenTree's own filter/search/ordering options support, read live from the same definitions the
+REST API uses.
+
 ## Installation
 
 ### InvenTree Plugin Manager

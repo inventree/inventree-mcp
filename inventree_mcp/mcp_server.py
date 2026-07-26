@@ -28,6 +28,6 @@ mcp = FastMCP(
 # Must run after the tool imports above - it attaches output schemas to
 # already-registered tools. See output_schemas.py.
 from . import output_schemas  # noqa: E402
-from .tools import categories, locations, parts, stock  # noqa: E402, F401
+from .tools import categories, discovery, locations, parts, stock  # noqa: E402, F401
 
 output_schemas.apply()
