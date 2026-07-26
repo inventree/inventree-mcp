@@ -20,10 +20,19 @@ async def list_stock_items(
 ) -> dict:
     """List stock items.
 
+    Returns a paginated envelope: {count, next, previous, results}. Each
+    entry in `results` has the same shape as get_stock_item's return value -
+    use its `pk` field with get_stock_item to fetch full detail for one of
+    them.
+
     Args:
         part: restrict to stock of this Part ID (includes variants of the part).
         location: restrict to stock held at this StockLocation ID.
-        in_stock: filter by whether the item currently counts as "in stock".
+        in_stock: True for only items that are actually usable right now -
+            quantity > 0, not allocated to a sales order/customer/build, not
+            currently mid-build, and in an "available" status (excludes e.g.
+            rejected/destroyed/lost stock). False for the inverse. Omit to
+            include both.
         filters: additional filter/ordering parameters beyond the named arguments
             above - call describe_filters("stock") to see what's available, e.g.
             filters={"low_stock": true, "ordering": "-quantity"}.
@@ -47,7 +56,19 @@ async def list_stock_items(
 
 @mcp.tool()
 async def get_stock_item(stock_item_id: int) -> dict:
-    """Get full detail for a single stock item by its ID."""
+    """Get full detail for a single stock item by its ID.
+
+    Returns the same object shape as one entry in list_stock_items's
+    `results` array. Get a valid ID from list_stock_items (its `pk` field)
+    if you don't already have one.
+
+    Args:
+        stock_item_id: the StockItem's database ID.
+
+    Raises:
+        ToolError: no stock item exists with that ID, or the caller doesn't
+            have permission to view it.
+    """
     from stock.api import StockDetail
 
     return await call_view(

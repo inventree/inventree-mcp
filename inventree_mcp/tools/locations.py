@@ -19,9 +19,19 @@ async def list_locations(
 ) -> dict:
     """List stock locations.
 
+    Returns a paginated envelope: {count, next, previous, results}. Each
+    entry in `results` has the same shape as get_location's return value -
+    use its `pk` field with get_location to fetch full detail for one of
+    them.
+
     Args:
         search: free-text search against name/description.
-        parent: restrict to direct children of this StockLocation ID.
+        parent: restrict to direct children of this StockLocation ID. Omit to
+            get only top-level (root) locations by default - pass
+            filters={"cascade": true} to include locations at every level
+            instead, or filters={"parent": <id>, "cascade": true} to get all
+            descendants of a specific location rather than just its direct
+            children.
         filters: additional filter/ordering parameters beyond the named arguments
             above - call describe_filters("location") to see what's available.
         limit: maximum number of results to return (capped at 100).
@@ -44,7 +54,19 @@ async def list_locations(
 
 @mcp.tool()
 async def get_location(location_id: int) -> dict:
-    """Get full detail for a single stock location by its ID."""
+    """Get full detail for a single stock location by its ID.
+
+    Returns the same object shape as one entry in list_locations's
+    `results` array. Get a valid ID from list_locations (its `pk` field)
+    if you don't already have one.
+
+    Args:
+        location_id: the StockLocation's database ID.
+
+    Raises:
+        ToolError: no location exists with that ID, or the caller doesn't
+            have permission to view it.
+    """
     from stock.api import StockLocationDetail
 
     return await call_view(

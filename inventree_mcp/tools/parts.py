@@ -25,10 +25,15 @@ async def list_parts(
 ) -> dict:
     """List parts in the InvenTree database.
 
+    Returns a paginated envelope: {count, next, previous, results}. Each
+    entry in `results` has the same shape as get_part's return value - use
+    its `pk` field with get_part to fetch full detail for one of them.
+
     Args:
         search: free-text search against name, description, IPN, and keywords.
         category: restrict to parts in this PartCategory ID (includes sub-categories).
-        active: filter by active/inactive status.
+        active: True for only active (non-discontinued) parts, False for only
+            inactive ones, omit to include both.
         filters: additional filter/ordering parameters beyond the named arguments
             above - call describe_filters("part") to see what's available, e.g.
             filters={"is_variant": true, "ordering": "-in_stock"}.
@@ -52,7 +57,19 @@ async def list_parts(
 
 @mcp.tool()
 async def get_part(part_id: int) -> dict:
-    """Get full detail for a single part by its ID."""
+    """Get full detail for a single part by its ID.
+
+    Returns the same object shape as one entry in list_parts's `results`
+    array. Get a valid ID from list_parts (its `pk` field) if you don't
+    already have one.
+
+    Args:
+        part_id: the Part's database ID.
+
+    Raises:
+        ToolError: no part exists with that ID, or the caller doesn't have
+            permission to view it.
+    """
     from part.api import PartDetail
 
     return await call_view(PartDetail, "GET", f"/api/part/{part_id}/", pk=part_id)
