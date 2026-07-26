@@ -87,11 +87,16 @@ async def call_view(
     Note:
         FastMCP calls tool functions directly in the request's event loop, and
         the actual view dispatch does synchronous Django ORM work - so it must
-        run in a worker thread (thread_sensitive=False, since there is no
-        Django-managed "sync thread" to pin to here) or Django raises
-        SynchronousOnlyOperation.
+        be handed off via sync_to_async, or Django raises
+        SynchronousOnlyOperation. thread_sensitive=True (the default) matters
+        here: it routes the call back onto the thread that's running the
+        request (see mcp_transport.py's use of async_to_sync), which keeps it
+        on the same DB connection - a plain worker thread would get its own
+        connection, silently missing whatever the request's transaction has
+        open (breaking Django TestCase's per-test transaction, and able to
+        deadlock against it under Postgres).
     """
-    return await sync_to_async(_call_view_sync, thread_sensitive=False)(
+    return await sync_to_async(_call_view_sync)(
         view_cls,
         method,
         path,

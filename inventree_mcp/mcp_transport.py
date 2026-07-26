@@ -15,6 +15,7 @@ import asyncio
 import contextlib
 from typing import TYPE_CHECKING, Any
 
+from asgiref.sync import async_to_sync
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.urls import path
 from django.utils.decorators import method_decorator
@@ -120,6 +121,12 @@ async def _handle_mcp_request(request: HttpRequest) -> HttpResponse:
     return response
 
 
+async def _handle_mcp_request_with_timeout(request: HttpRequest) -> HttpResponse:
+    return await asyncio.wait_for(
+        _handle_mcp_request(request), timeout=_REQUEST_TIMEOUT_SECONDS
+    )
+
+
 def _error_response(status: int, message: str) -> JsonResponse:
     return JsonResponse(
         {"jsonrpc": "2.0", "error": {"code": -32000, "message": message}, "id": None},
@@ -141,13 +148,11 @@ class MCPView(View):
             )
 
         token = set_current_user(request.user if hasattr(request, "user") else None)
-        loop = asyncio.new_event_loop()
         try:
-            return loop.run_until_complete(
-                asyncio.wait_for(
-                    _handle_mcp_request(request), timeout=_REQUEST_TIMEOUT_SECONDS
-                )
-            )
+            # async_to_sync (rather than a hand-rolled event loop) is what lets
+            # proxy.call_view()'s sync_to_async(thread_sensitive=True) route
+            # back onto *this* thread - see the note in proxy.py.
+            return async_to_sync(_handle_mcp_request_with_timeout)(request)
         except TimeoutError:
             return _error_response(
                 504, f"Request timed out after {_REQUEST_TIMEOUT_SECONDS:.0f}s"
@@ -156,15 +161,6 @@ class MCPView(View):
             return _error_response(500, "Internal server error")
         finally:
             reset_current_user(token)
-            pending = asyncio.all_tasks(loop)
-            for pending_task in pending:
-                pending_task.cancel()
-            if pending:
-                with contextlib.suppress(Exception):
-                    loop.run_until_complete(
-                        asyncio.gather(*pending, return_exceptions=True)
-                    )
-            loop.close()
 
 
 urlpatterns = [path("mcp/", MCPView.as_view(), name="mcp-endpoint")]

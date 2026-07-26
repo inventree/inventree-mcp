@@ -50,9 +50,15 @@ class MCPToolPermissionTest(InvenTreeTestCase):
         )
 
     def _as(self, user):
-        """Bind *user* as the acting MCP user for the duration of the current test."""
-        token = context.set_current_user(user)
-        self.addCleanup(context.reset_current_user, token)
+        """Bind *user* as the acting MCP user for the duration of the current test.
+
+        Uses a plain set() rather than context.reset_current_user(): Django's
+        async test wrapper runs addCleanup callbacks outside the test
+        coroutine's own contextvars.Context, and a Token can only be reset in
+        the exact Context that produced it.
+        """
+        context.set_current_user(user)
+        self.addCleanup(context.set_current_user, None)
 
     async def test_authorized_user_can_list_parts(self):
         self._as(self.user)
