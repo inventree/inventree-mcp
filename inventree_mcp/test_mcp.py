@@ -15,6 +15,7 @@ import unittest
 from typing import Any, ClassVar
 from unittest.mock import patch
 
+import jsonschema
 from asgiref.sync import sync_to_async
 from build.models import Build, BuildItem
 from company.models import Address, Company, Contact, ManufacturerPart, SupplierPart
@@ -642,9 +643,12 @@ class OutputSchemaTest(InvenTreeTestCase):
         schema = serializer_schema(PartSerializer)
         props = schema["properties"]
 
-        self.assertEqual(props["active"]["type"], "boolean")
-        self.assertEqual(props["description"]["type"], "string")
-        # 'category' is a nullable FK -> integer-or-null, not just integer.
+        # Every concrete type is nullable, even when DRF's allow_null says
+        # False - see schema_introspection.py's _field_schema() for why
+        # allow_null can't be trusted for this (it governs input validation,
+        # not what to_representation() can actually emit).
+        self.assertEqual(props["active"]["type"], ["boolean", "null"])
+        self.assertEqual(props["description"]["type"], ["string", "null"])
         self.assertEqual(props["category"]["type"], ["integer", "null"])
 
     def test_paginated_schema_wraps_results_array(self):
@@ -703,6 +707,38 @@ class OutputSchemaTest(InvenTreeTestCase):
         self.assertIsInstance(result, tuple)
         _content, structured = result
         self.assertIn("results", structured)
+
+    async def test_output_schema_accepts_real_nullable_field_values(self):
+        """Regression test for a real bug found via a live trial run, not a hypothetical.
+
+        `mcp.call_tool()` (used above) only exercises FastMCP's *permissive*
+        output_model validation (func_metadata.py's convert_result()) - real
+        requests over HTTP go through a second, separate, strict validation
+        in mcp.server.lowlevel.server.py's call_tool handler:
+        `jsonschema.validate(instance=structured_content, schema=tool.outputSchema)`.
+        That one enforces our *declared* schema for real, and DRF's
+        `allow_null` (what schema_introspection.py used to key off of) does
+        NOT reliably predict what to_representation() can emit: PartSerializer
+        declares IPN with allow_null=False, but Part.IPN is a nullable
+        CharField - a real part with IPN=None broke every list_parts call
+        with more than one page of real data ("None is not of type
+        'string'"), reproduced live against the running dev server, not
+        just in a unit test. See schema_introspection.py's _field_schema().
+        """
+        context.set_current_user(self.user)
+        self.addCleanup(context.set_current_user, None)
+
+        part_with_null_ipn = await sync_to_async(Part.objects.create)(
+            name="Null IPN Part",
+            description="Regression fixture for null IPN",
+            IPN=None,
+        )
+
+        tool = mcp._tool_manager.get_tool("get_part")
+        result = await get_part(part_with_null_ipn.pk)
+
+        self.assertIsNone(result["IPN"])
+        jsonschema.validate(instance=result, schema=tool.output_schema)
 
 
 class DescribeFiltersTest(InvenTreeTestCase):
