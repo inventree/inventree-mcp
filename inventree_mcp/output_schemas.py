@@ -32,6 +32,14 @@ from __future__ import annotations
 
 from typing import Any
 
+from build.serializers import BuildItemSerializer, BuildLineSerializer, BuildSerializer
+from order.serializers import (
+    PurchaseOrderLineItemSerializer,
+    PurchaseOrderSerializer,
+    SalesOrderAllocationSerializer,
+    SalesOrderLineItemSerializer,
+    SalesOrderSerializer,
+)
 from part.serializers import CategorySerializer, PartSerializer
 from pydantic import RootModel
 from stock.serializers import LocationSerializer, StockItemSerializer
@@ -50,6 +58,22 @@ _OUTPUT_SCHEMAS = {
     "get_stock_item": serializer_schema(StockItemSerializer),
     "list_locations": paginated_schema(LocationSerializer),
     "get_location": serializer_schema(LocationSerializer),
+    "list_purchase_orders": paginated_schema(PurchaseOrderSerializer),
+    "get_purchase_order": serializer_schema(PurchaseOrderSerializer),
+    "list_purchase_order_lines": paginated_schema(PurchaseOrderLineItemSerializer),
+    "get_purchase_order_line": serializer_schema(PurchaseOrderLineItemSerializer),
+    "list_sales_orders": paginated_schema(SalesOrderSerializer),
+    "get_sales_order": serializer_schema(SalesOrderSerializer),
+    "list_sales_order_lines": paginated_schema(SalesOrderLineItemSerializer),
+    "get_sales_order_line": serializer_schema(SalesOrderLineItemSerializer),
+    "list_sales_order_allocations": paginated_schema(SalesOrderAllocationSerializer),
+    "get_sales_order_allocation": serializer_schema(SalesOrderAllocationSerializer),
+    "list_build_orders": paginated_schema(BuildSerializer),
+    "get_build_order": serializer_schema(BuildSerializer),
+    "list_build_lines": paginated_schema(BuildLineSerializer),
+    "get_build_line": serializer_schema(BuildLineSerializer),
+    "list_build_items": paginated_schema(BuildItemSerializer),
+    "get_build_item": serializer_schema(BuildItemSerializer),
 }
 
 

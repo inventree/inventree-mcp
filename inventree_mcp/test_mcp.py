@@ -16,14 +16,24 @@ from typing import Any, ClassVar
 from unittest.mock import patch
 
 from asgiref.sync import sync_to_async
+from build.models import Build, BuildItem
+from company.models import Company, SupplierPart
 from django.contrib.auth import get_user_model
 from django.test import Client, override_settings
 from django.utils import timezone
 from InvenTree.unit_test import InvenTreeTestCase
 from mcp.server.fastmcp.exceptions import ToolError
 from oauth2_provider.models import AccessToken, Application
+from order.models import (
+    PurchaseOrder,
+    PurchaseOrderLineItem,
+    SalesOrder,
+    SalesOrderAllocation,
+    SalesOrderLineItem,
+    SalesOrderShipment,
+)
 from part.api import PartList
-from part.models import Part, PartCategory
+from part.models import BomItem, Part, PartCategory
 from part.serializers import PartSerializer
 from plugin import registry
 from stock.models import StockItem, StockLocation
@@ -35,10 +45,32 @@ from .proxy import call_view
 from .schema_introspection import paginated_schema, serializer_schema
 from .settings import get_plugin_setting
 from .tools._common import DEFAULT_LIMIT, MAX_LIMIT, build_query_params, clamp_limit
+from .tools.build_orders import (
+    get_build_item,
+    get_build_line,
+    get_build_order,
+    list_build_items,
+    list_build_lines,
+    list_build_orders,
+)
 from .tools.categories import get_category, list_categories
 from .tools.discovery import describe_filters
 from .tools.locations import get_location, list_locations
 from .tools.parts import get_part, list_parts
+from .tools.purchase_orders import (
+    get_purchase_order,
+    get_purchase_order_line,
+    list_purchase_order_lines,
+    list_purchase_orders,
+)
+from .tools.sales_orders import (
+    get_sales_order,
+    get_sales_order_allocation,
+    get_sales_order_line,
+    list_sales_order_allocations,
+    list_sales_order_lines,
+    list_sales_orders,
+)
 from .tools.stock import get_stock_item, list_stock_items
 
 
@@ -51,6 +83,9 @@ class MCPToolPermissionTest(InvenTreeTestCase):
         "part_category.view",
         "stock.view",
         "stock_location.view",
+        "purchase_order.view",
+        "sales_order.view",
+        "build.view",
     ]
 
     @classmethod
@@ -62,13 +97,81 @@ class MCPToolPermissionTest(InvenTreeTestCase):
             name="Widgets", description="Test category"
         )
         cls.part = Part.objects.create(
-            name="Test Part", description="A part for MCP tests", category=cls.category
+            name="Test Part",
+            description="A part for MCP tests",
+            category=cls.category,
+            salable=True,
+            purchaseable=True,
         )
         cls.location = StockLocation.objects.create(
             name="Test Location", description="A location for MCP tests"
         )
         cls.stock_item = StockItem.objects.create(
             part=cls.part, quantity=10, location=cls.location
+        )
+
+        # --- Purchase order fixtures ---
+        cls.supplier = Company.objects.create(
+            name="Test Supplier", is_supplier=True, is_customer=False
+        )
+        cls.supplier_part = SupplierPart.objects.create(
+            part=cls.part, supplier=cls.supplier, SKU="MCP-TEST-SKU"
+        )
+        cls.purchase_order = PurchaseOrder.objects.create(
+            supplier=cls.supplier, reference="PO-MCP-0001"
+        )
+        cls.po_line = PurchaseOrderLineItem.objects.create(
+            part=cls.supplier_part, order=cls.purchase_order, quantity=50
+        )
+
+        # --- Sales order fixtures ---
+        cls.customer = Company.objects.create(
+            name="Test Customer", is_customer=True, is_supplier=False
+        )
+        cls.sales_order = SalesOrder.objects.create(
+            customer=cls.customer, reference="SO-MCP-0001"
+        )
+        cls.so_line = SalesOrderLineItem.objects.create(
+            order=cls.sales_order, part=cls.part, quantity=5
+        )
+        cls.shipment = cls.sales_order.shipments.first()
+        if cls.shipment is None:
+            cls.shipment = SalesOrderShipment.objects.create(
+                order=cls.sales_order, reference="1"
+            )
+        cls.allocation_stock_item = StockItem.objects.create(
+            part=cls.part, quantity=100, location=cls.location
+        )
+        cls.so_allocation = SalesOrderAllocation.objects.create(
+            quantity=5,
+            line=cls.so_line,
+            item=cls.allocation_stock_item,
+            shipment=cls.shipment,
+        )
+
+        # --- Build order fixtures ---
+        cls.assembly_part = Part.objects.create(
+            name="Test Assembly", description="Assembly for MCP tests", assembly=True
+        )
+        # MPTT's tree_id assignment for new root nodes can collide across
+        # separate TestCase classes in the same test run (a pre-existing
+        # django-mptt/test-isolation quirk, not something this plugin
+        # controls) - rebuild() forces consistent, non-colliding tree state
+        # before the BOM relationship check below relies on tree_id.
+        Part.objects.rebuild()
+        cls.part.refresh_from_db()
+        cls.assembly_part.refresh_from_db()
+        cls.bom_item = BomItem.objects.create(
+            part=cls.assembly_part, sub_part=cls.part, quantity=1
+        )
+        cls.build = Build.objects.create(
+            part=cls.assembly_part, reference="BO-0001", quantity=10
+        )
+        # BuildLine objects are auto-created (one per BOM item) via a
+        # post_save signal on Build - see Build.create_build_line_items().
+        cls.build_line = cls.build.build_lines.first()
+        cls.build_item = BuildItem.objects.create(
+            build_line=cls.build_line, stock_item=cls.allocation_stock_item, quantity=1
         )
 
         # A second user, deliberately given no roles at all.
@@ -219,6 +322,28 @@ class MCPToolPermissionTest(InvenTreeTestCase):
         inactive_only = await list_parts(search="Test Part", filters={"active": False})
         self.assertNotIn("Test Part", [p["name"] for p in inactive_only["results"]])
 
+    async def test_filters_dict_reaches_build_and_order_views(self):
+        """Spot-check the same filters-passthrough behaviour for the new order/build tools."""
+        self._as(self.user)
+
+        outstanding = await list_purchase_orders(
+            supplier=self.supplier.pk, filters={"outstanding": True}
+        )
+        refs = [o["reference"] for o in outstanding["results"]]
+        self.assertIn("PO-MCP-0001", refs)
+
+        not_outstanding = await list_purchase_orders(
+            supplier=self.supplier.pk, filters={"outstanding": False}
+        )
+        self.assertNotIn(
+            "PO-MCP-0001", [o["reference"] for o in not_outstanding["results"]]
+        )
+
+        allocated = await list_sales_order_lines(
+            order=self.sales_order.pk, filters={"allocated": True}
+        )
+        self.assertIn(self.so_line.pk, [line["pk"] for line in allocated["results"]])
+
     async def test_filters_cannot_bypass_limit_clamp(self):
         """filters={"limit": ...} must not override clamp_limit()'s pagination cap."""
         self._as(self.user)
@@ -281,6 +406,125 @@ class MCPToolPermissionTest(InvenTreeTestCase):
         names = [p["name"] for p in result["results"]]
         self.assertIn("Test Part", names)
 
+    async def test_authorized_user_can_list_and_get_purchase_orders(self):
+        self._as(self.user)
+
+        listed = await list_purchase_orders(supplier=self.supplier.pk)
+        refs = [o["reference"] for o in listed["results"]]
+        self.assertIn("PO-MCP-0001", refs)
+
+        detail = await get_purchase_order(self.purchase_order.pk)
+        self.assertEqual(detail["reference"], "PO-MCP-0001")
+
+    async def test_authorized_user_can_list_and_get_purchase_order_lines(self):
+        self._as(self.user)
+
+        listed = await list_purchase_order_lines(order=self.purchase_order.pk)
+        ids = [line["pk"] for line in listed["results"]]
+        self.assertIn(self.po_line.pk, ids)
+
+        detail = await get_purchase_order_line(self.po_line.pk)
+        self.assertEqual(detail["order"], self.purchase_order.pk)
+
+    async def test_authorized_user_can_list_and_get_sales_orders(self):
+        self._as(self.user)
+
+        listed = await list_sales_orders(customer=self.customer.pk)
+        refs = [o["reference"] for o in listed["results"]]
+        self.assertIn("SO-MCP-0001", refs)
+
+        detail = await get_sales_order(self.sales_order.pk)
+        self.assertEqual(detail["reference"], "SO-MCP-0001")
+
+    async def test_authorized_user_can_list_and_get_sales_order_lines(self):
+        self._as(self.user)
+
+        listed = await list_sales_order_lines(order=self.sales_order.pk)
+        ids = [line["pk"] for line in listed["results"]]
+        self.assertIn(self.so_line.pk, ids)
+
+        detail = await get_sales_order_line(self.so_line.pk)
+        self.assertEqual(detail["order"], self.sales_order.pk)
+
+    async def test_authorized_user_can_list_and_get_sales_order_allocations(self):
+        self._as(self.user)
+
+        listed = await list_sales_order_allocations(order=self.sales_order.pk)
+        ids = [alloc["pk"] for alloc in listed["results"]]
+        self.assertIn(self.so_allocation.pk, ids)
+
+        detail = await get_sales_order_allocation(self.so_allocation.pk)
+        self.assertEqual(detail["line"], self.so_line.pk)
+
+    async def test_authorized_user_can_list_and_get_build_orders(self):
+        self._as(self.user)
+
+        listed = await list_build_orders(part=self.assembly_part.pk)
+        refs = [b["reference"] for b in listed["results"]]
+        self.assertIn("BO-0001", refs)
+
+        detail = await get_build_order(self.build.pk)
+        self.assertEqual(detail["reference"], "BO-0001")
+
+    async def test_authorized_user_can_list_and_get_build_lines(self):
+        self._as(self.user)
+
+        listed = await list_build_lines(build=self.build.pk)
+        ids = [line["pk"] for line in listed["results"]]
+        self.assertIn(self.build_line.pk, ids)
+
+        detail = await get_build_line(self.build_line.pk)
+        self.assertEqual(detail["build"], self.build.pk)
+
+    async def test_authorized_user_can_list_and_get_build_items(self):
+        self._as(self.user)
+
+        listed = await list_build_items(build=self.build.pk)
+        ids = [item["pk"] for item in listed["results"]]
+        self.assertIn(self.build_item.pk, ids)
+
+        detail = await get_build_item(self.build_item.pk)
+        self.assertEqual(detail["stock_item"], self.allocation_stock_item.pk)
+
+    async def test_unauthorized_user_cannot_access_purchase_sales_or_build_data(self):
+        """Denial coverage for all three new order/build domains at once."""
+        self._as(self.no_access_user)
+
+        with self.assertRaises(ToolError):
+            await list_purchase_orders()
+        with self.assertRaises(ToolError):
+            await get_purchase_order(self.purchase_order.pk)
+        with self.assertRaises(ToolError):
+            await list_purchase_order_lines()
+        with self.assertRaises(ToolError):
+            await get_purchase_order_line(self.po_line.pk)
+
+        with self.assertRaises(ToolError):
+            await list_sales_orders()
+        with self.assertRaises(ToolError):
+            await get_sales_order(self.sales_order.pk)
+        with self.assertRaises(ToolError):
+            await list_sales_order_lines()
+        with self.assertRaises(ToolError):
+            await get_sales_order_line(self.so_line.pk)
+        with self.assertRaises(ToolError):
+            await list_sales_order_allocations()
+        with self.assertRaises(ToolError):
+            await get_sales_order_allocation(self.so_allocation.pk)
+
+        with self.assertRaises(ToolError):
+            await list_build_orders()
+        with self.assertRaises(ToolError):
+            await get_build_order(self.build.pk)
+        with self.assertRaises(ToolError):
+            await list_build_lines()
+        with self.assertRaises(ToolError):
+            await get_build_line(self.build_line.pk)
+        with self.assertRaises(ToolError):
+            await list_build_items()
+        with self.assertRaises(ToolError):
+            await get_build_item(self.build_item.pk)
+
 
 class OutputSchemaTest(InvenTreeTestCase):
     """Verify tool output schemas are derived from the real serializers, not left blank.
@@ -320,6 +564,20 @@ class OutputSchemaTest(InvenTreeTestCase):
         self.assertIsNotNone(tools["get_part"].outputSchema)
         self.assertIn("name", tools["get_part"].outputSchema["properties"])
 
+        self.assertIsNotNone(tools["list_purchase_orders"].outputSchema)
+        self.assertIsNotNone(tools["get_build_item"].outputSchema)
+
+    async def test_every_registered_tool_has_an_output_schema(self):
+        """Guard against a new tool being added without a matching entry in output_schemas.py."""
+        tools = await mcp.list_tools()
+
+        missing = [
+            tool.name
+            for tool in tools
+            if tool.name != "describe_filters" and tool.outputSchema is None
+        ]
+        self.assertEqual(missing, [])
+
     async def test_call_tool_still_returns_real_data(self):
         """Regression test: declaring output_schema without a matching output_model breaks every real call.
 
@@ -356,6 +614,25 @@ class DescribeFiltersTest(InvenTreeTestCase):
         self.assertIn("name", result["search_fields"])
         self.assertIn("is_variant", result["filters"])
         self.assertEqual(result["filters"]["is_variant"]["type"], "boolean")
+
+    def test_describe_filters_covers_order_and_build_resources(self):
+        for resource in (
+            "purchase_order",
+            "purchase_order_line",
+            "sales_order",
+            "sales_order_line",
+            "sales_order_allocation",
+            "build_order",
+            "build_line",
+            "build_item",
+        ):
+            result = describe_filters(resource)
+            self.assertIn("filters", result)
+            self.assertTrue(result["filters"])
+
+        self.assertIn("outstanding", describe_filters("purchase_order")["filters"])
+        self.assertIn("allocated", describe_filters("sales_order_line")["filters"])
+        self.assertIn("build", describe_filters("build_line")["filters"])
 
     def test_describe_filters_rejects_unknown_resource(self):
         with self.assertRaises(ToolError):
