@@ -1,7 +1,8 @@
 """MCP server for InvenTree"""
 
-from plugin import InvenTreePlugin
+from typing import ClassVar
 
+from plugin import InvenTreePlugin
 from plugin.mixins import SettingsMixin, UrlsMixin
 
 from . import PLUGIN_VERSION
@@ -28,13 +29,12 @@ class InvenTreeMCP(SettingsMixin, UrlsMixin, InvenTreePlugin):
 
     # Plugin settings (from SettingsMixin)
     # Ref: https://docs.inventree.org/en/latest/plugins/mixins/settings/
-    SETTINGS = {
-        # Define your plugin settings here...
-        "CUSTOM_VALUE": {
-            "name": "Custom Value",
-            "description": "A custom value",
-            "validator": int,
-            "default": 42,
+    SETTINGS: ClassVar[dict] = {
+        "REQUIRE_AUTH": {
+            "name": "Require Authentication",
+            "description": "Reject unauthenticated requests to the MCP endpoint. Disable only for local testing.",
+            "validator": bool,
+            "default": True,
         }
     }
 
@@ -42,10 +42,6 @@ class InvenTreeMCP(SettingsMixin, UrlsMixin, InvenTreePlugin):
     # Ref: https://docs.inventree.org/en/latest/plugins/mixins/urls/
     def setup_urls(self):
         """Configure custom URL endpoints for this plugin."""
-        from django.urls import path
-        from .views import ExampleView
+        from .mcp_transport import urlpatterns
 
-        return [
-            # Provide path to a simple custom view - replace this with your own views
-            path("example/", ExampleView.as_view(), name="example-view"),
-        ]
+        return urlpatterns
