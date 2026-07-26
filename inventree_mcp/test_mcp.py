@@ -54,43 +54,43 @@ class MCPToolPermissionTest(InvenTreeTestCase):
         token = context.set_current_user(user)
         self.addCleanup(context.reset_current_user, token)
 
-    def test_authorized_user_can_list_parts(self):
+    async def test_authorized_user_can_list_parts(self):
         self._as(self.user)
-        result = list_parts(search="Test Part")
+        result = await list_parts(search="Test Part")
         names = [p["name"] for p in result["results"]]
         self.assertIn("Test Part", names)
 
-    def test_authorized_user_can_get_part(self):
+    async def test_authorized_user_can_get_part(self):
         self._as(self.user)
-        result = get_part(self.part.pk)
+        result = await get_part(self.part.pk)
         self.assertEqual(result["name"], "Test Part")
 
-    def test_unauthorized_user_cannot_list_or_get_parts(self):
+    async def test_unauthorized_user_cannot_list_or_get_parts(self):
         """A user without the 'part' view role must not see part data via MCP."""
         self._as(self.no_access_user)
 
         with self.assertRaises(ToolError):
-            list_parts()
+            await list_parts()
 
         with self.assertRaises(ToolError):
-            get_part(self.part.pk)
+            await get_part(self.part.pk)
 
-    def test_unauthorized_user_cannot_list_categories_or_stock(self):
+    async def test_unauthorized_user_cannot_list_categories_or_stock(self):
         self._as(self.no_access_user)
 
         with self.assertRaises(ToolError):
-            list_categories()
+            await list_categories()
 
         with self.assertRaises(ToolError):
-            list_stock_items()
+            await list_stock_items()
 
-    def test_no_bound_user_fails_closed(self):
+    async def test_no_bound_user_fails_closed(self):
         """Calling a tool with no bound user (e.g. outside of a real MCP request) must fail."""
         with self.assertRaises(PermissionError):
-            list_parts()
+            await list_parts()
 
-    def test_limit_is_clamped(self):
+    async def test_limit_is_clamped(self):
         """A caller-supplied limit above the cap must not be passed straight through."""
         self._as(self.user)
-        result = list_parts(limit=10_000)
+        result = await list_parts(limit=10_000)
         self.assertLessEqual(len(result["results"]), 100)

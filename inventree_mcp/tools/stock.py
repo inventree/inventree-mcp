@@ -8,7 +8,7 @@ from ._common import clamp_limit
 
 
 @mcp.tool()
-def list_stock_items(
+async def list_stock_items(
     part: int | None = None,
     location: int | None = None,
     in_stock: bool | None = None,
@@ -35,14 +35,14 @@ def list_stock_items(
     if in_stock is not None:
         params["in_stock"] = in_stock
 
-    return call_view(StockList, "GET", "/api/stock/", query_params=params)
+    return await call_view(StockList, "GET", "/api/stock/", query_params=params)
 
 
 @mcp.tool()
-def get_stock_item(stock_item_id: int) -> dict:
+async def get_stock_item(stock_item_id: int) -> dict:
     """Get full detail for a single stock item by its ID."""
     from stock.api import StockDetail
 
-    return call_view(
+    return await call_view(
         StockDetail, "GET", f"/api/stock/{stock_item_id}/", pk=stock_item_id
     )

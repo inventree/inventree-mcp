@@ -8,7 +8,7 @@ from ._common import clamp_limit
 
 
 @mcp.tool()
-def list_categories(
+async def list_categories(
     search: str | None = None,
     parent: int | None = None,
     limit: int = 25,
@@ -31,14 +31,16 @@ def list_categories(
     if parent is not None:
         params["parent"] = parent
 
-    return call_view(CategoryList, "GET", "/api/part/category/", query_params=params)
+    return await call_view(
+        CategoryList, "GET", "/api/part/category/", query_params=params
+    )
 
 
 @mcp.tool()
-def get_category(category_id: int) -> dict:
+async def get_category(category_id: int) -> dict:
     """Get full detail for a single part category by its ID."""
     from part.api import CategoryDetail
 
-    return call_view(
+    return await call_view(
         CategoryDetail, "GET", f"/api/part/category/{category_id}/", pk=category_id
     )

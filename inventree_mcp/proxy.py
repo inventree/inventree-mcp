@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from asgiref.sync import sync_to_async
 from mcp.server.fastmcp.exceptions import ToolError
 from rest_framework.test import APIRequestFactory, force_authenticate
 from rest_framework.views import APIView
@@ -21,7 +22,42 @@ from .context import get_current_user
 _factory = APIRequestFactory()
 
 
-def call_view(
+def _call_view_sync(
+    view_cls: type[APIView],
+    method: str,
+    path: str,
+    *,
+    query_params: dict[str, Any] | None = None,
+    data: dict[str, Any] | None = None,
+    **view_kwargs: Any,
+) -> Any:
+    user = get_current_user()
+    method = method.upper()
+
+    factory_method = getattr(_factory, method.lower())
+
+    if method == "GET":
+        request = factory_method(path, data=query_params or {})
+    else:
+        request = factory_method(path, data=data or {}, format="json")
+
+    force_authenticate(request, user=user)
+
+    response = view_cls.as_view()(request, **view_kwargs)
+    response.render()
+
+    body = json.loads(response.rendered_content or b"{}")
+
+    if response.status_code >= 400:
+        detail = body.get("detail") if isinstance(body, dict) else None
+        raise ToolError(
+            detail or f"Request failed with status {response.status_code}: {body}"
+        )
+
+    return body
+
+
+async def call_view(
     view_cls: type[APIView],
     method: str,
     path: str,
@@ -47,28 +83,19 @@ def call_view(
         ToolError: the underlying API call did not succeed (permission denied,
             not found, validation error, ...). The message is safe to surface
             to the calling agent.
+
+    Note:
+        FastMCP calls tool functions directly in the request's event loop, and
+        the actual view dispatch does synchronous Django ORM work - so it must
+        run in a worker thread (thread_sensitive=False, since there is no
+        Django-managed "sync thread" to pin to here) or Django raises
+        SynchronousOnlyOperation.
     """
-    user = get_current_user()
-    method = method.upper()
-
-    factory_method = getattr(_factory, method.lower())
-
-    if method == "GET":
-        request = factory_method(path, data=query_params or {})
-    else:
-        request = factory_method(path, data=data or {}, format="json")
-
-    force_authenticate(request, user=user)
-
-    response = view_cls.as_view()(request, **view_kwargs)
-    response.render()
-
-    body = json.loads(response.rendered_content or b"{}")
-
-    if response.status_code >= 400:
-        detail = body.get("detail") if isinstance(body, dict) else None
-        raise ToolError(
-            detail or f"Request failed with status {response.status_code}: {body}"
-        )
-
-    return body
+    return await sync_to_async(_call_view_sync, thread_sensitive=False)(
+        view_cls,
+        method,
+        path,
+        query_params=query_params,
+        data=data,
+        **view_kwargs,
+    )

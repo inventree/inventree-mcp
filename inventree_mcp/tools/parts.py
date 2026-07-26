@@ -13,7 +13,7 @@ from ._common import clamp_limit
 
 
 @mcp.tool()
-def list_parts(
+async def list_parts(
     search: str | None = None,
     category: int | None = None,
     active: bool | None = None,
@@ -40,12 +40,12 @@ def list_parts(
     if active is not None:
         params["active"] = active
 
-    return call_view(PartList, "GET", "/api/part/", query_params=params)
+    return await call_view(PartList, "GET", "/api/part/", query_params=params)
 
 
 @mcp.tool()
-def get_part(part_id: int) -> dict:
+async def get_part(part_id: int) -> dict:
     """Get full detail for a single part by its ID."""
     from part.api import PartDetail
 
-    return call_view(PartDetail, "GET", f"/api/part/{part_id}/", pk=part_id)
+    return await call_view(PartDetail, "GET", f"/api/part/{part_id}/", pk=part_id)

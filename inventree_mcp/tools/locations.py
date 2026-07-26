@@ -8,7 +8,7 @@ from ._common import clamp_limit
 
 
 @mcp.tool()
-def list_locations(
+async def list_locations(
     search: str | None = None,
     parent: int | None = None,
     limit: int = 25,
@@ -31,17 +31,17 @@ def list_locations(
     if parent is not None:
         params["parent"] = parent
 
-    return call_view(
+    return await call_view(
         StockLocationList, "GET", "/api/stock/location/", query_params=params
     )
 
 
 @mcp.tool()
-def get_location(location_id: int) -> dict:
+async def get_location(location_id: int) -> dict:
     """Get full detail for a single stock location by its ID."""
     from stock.api import StockLocationDetail
 
-    return call_view(
+    return await call_view(
         StockLocationDetail,
         "GET",
         f"/api/stock/location/{location_id}/",
