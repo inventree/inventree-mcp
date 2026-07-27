@@ -26,6 +26,9 @@ classifiers = [
     "Operating System :: OS Independent",
     "Framework :: InvenTree",
 ]
+[project.optional-dependencies]
+test = ["coverage"]
+
 [project.urls]
 Homepage = "https://github.com/inventree/inventree-mcp"
 
@@ -51,3 +54,7 @@ exclude = [
 ]
 
 src=["inventree_mcp"]
+
+[tool.coverage.run]
+source = ["inventree_mcp"]
+omit = ["*/test_mcp.py"]
