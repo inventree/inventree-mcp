@@ -19,6 +19,7 @@ async def list_parts(
     search: str | None = None,
     category: int | None = None,
     active: bool | None = None,
+    ordering: str | None = None,
     filters: dict[str, Any] | None = None,
     limit: int = 25,
     offset: int = 0,
@@ -34,9 +35,16 @@ async def list_parts(
         category: restrict to parts in this PartCategory ID (includes sub-categories).
         active: True for only active (non-discontinued) parts, False for only
             inactive ones, omit to include both.
-        filters: additional filter/ordering parameters beyond the named arguments
-            above - call describe_filters("part") to see what's available, e.g.
-            filters={"is_variant": true, "ordering": "-in_stock"}.
+        ordering: field to sort results by, e.g. "-in_stock" for highest stock
+            first ('-' prefix for descending, omit it for ascending). Combine
+            with limit to get a "top N by X" result, e.g. ordering="-in_stock",
+            limit=5 for the 5 parts with the most stock. Call
+            describe_filters("part") and check its ordering_fields list for
+            valid values - an unrecognized field is silently ignored (no
+            error, no sort) rather than rejected.
+        filters: additional filter parameters beyond the named arguments
+            above - call describe_filters("part") to see what's available,
+            e.g. filters={"is_variant": true}.
         limit: maximum number of results to return (capped at 100).
         offset: pagination offset.
     """
@@ -49,6 +57,8 @@ async def list_parts(
         base["category"] = category
     if active is not None:
         base["active"] = active
+    if ordering is not None:
+        base["ordering"] = ordering
 
     params = build_query_params(base, filters, limit, offset)
 

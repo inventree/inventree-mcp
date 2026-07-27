@@ -14,6 +14,7 @@ async def list_build_orders(
     part: int | None = None,
     status: int | None = None,
     outstanding: bool | None = None,
+    ordering: str | None = None,
     filters: dict[str, Any] | None = None,
     limit: int = 25,
     offset: int = 0,
@@ -34,9 +35,16 @@ async def list_build_orders(
             filters={"overdue": true} for the common cases instead.
         outstanding: True for build orders that are still active (not yet
             complete/cancelled), False for the inverse. Omit to include both.
-        filters: additional filter/ordering parameters beyond the named
-            arguments above - call describe_filters("build_order") to see
-            what's available, e.g. filters={"overdue": true, "ordering": "-target_date"}.
+        ordering: field to sort results by, e.g. "-target_date" for the
+            orders due soonest first ('-' prefix for descending, omit it for
+            ascending). Combine with limit to get a "top N by X" result, e.g.
+            ordering="target_date", limit=5 for the 5 most overdue open
+            builds. Call describe_filters("build_order") and check its
+            ordering_fields list for valid values - an unrecognized field is
+            silently ignored (no error, no sort) rather than rejected.
+        filters: additional filter parameters beyond the named arguments
+            above - call describe_filters("build_order") to see what's
+            available, e.g. filters={"overdue": true}.
         limit: maximum number of results to return (capped at 100).
         offset: pagination offset.
     """
@@ -49,6 +57,8 @@ async def list_build_orders(
         base["status"] = status
     if outstanding is not None:
         base["outstanding"] = outstanding
+    if ordering is not None:
+        base["ordering"] = ordering
 
     params = build_query_params(base, filters, limit, offset)
 
@@ -81,6 +91,7 @@ async def get_build_order(build_id: int) -> dict:
 @mcp.tool()
 async def list_build_lines(
     build: int | None = None,
+    ordering: str | None = None,
     filters: dict[str, Any] | None = None,
     limit: int = 25,
     offset: int = 0,
@@ -100,11 +111,16 @@ async def list_build_lines(
     Args:
         build: restrict to lines on this Build (build order) ID. Omitting
             this returns build lines across every build order.
-        filters: additional filter/ordering parameters beyond the named
-            arguments above - call describe_filters("build_line") to see
-            what's available, e.g. filters={"allocated": false} for lines
-            still needing stock, or filters={"consumable": false} to
-            exclude consumable (non-tracked) components.
+        ordering: field to sort results by ('-' prefix for descending, omit
+            it for ascending). Call describe_filters("build_line") and
+            check its ordering_fields list for valid values - an
+            unrecognized field is silently ignored (no error, no sort)
+            rather than rejected.
+        filters: additional filter parameters beyond the named arguments
+            above - call describe_filters("build_line") to see what's
+            available, e.g. filters={"allocated": false} for lines still
+            needing stock, or filters={"consumable": false} to exclude
+            consumable (non-tracked) components.
         limit: maximum number of results to return (capped at 100).
         offset: pagination offset.
     """
@@ -113,6 +129,8 @@ async def list_build_lines(
     base: dict[str, Any] = {}
     if build is not None:
         base["build"] = build
+    if ordering is not None:
+        base["ordering"] = ordering
 
     params = build_query_params(base, filters, limit, offset)
 
@@ -147,6 +165,7 @@ async def get_build_line(line_id: int) -> dict:
 async def list_build_items(
     build: int | None = None,
     part: int | None = None,
+    ordering: str | None = None,
     filters: dict[str, Any] | None = None,
     limit: int = 25,
     offset: int = 0,
@@ -167,10 +186,15 @@ async def list_build_items(
     Args:
         build: restrict to allocations on this Build (build order) ID.
         part: restrict to allocations of stock for this Part ID.
-        filters: additional filter/ordering parameters beyond the named
-            arguments above - call describe_filters("build_item") to see
-            what's available, e.g. filters={"output": null} for allocations
-            not yet installed into a specific build output.
+        ordering: field to sort results by ('-' prefix for descending, omit
+            it for ascending). Call describe_filters("build_item") and
+            check its ordering_fields list for valid values - an
+            unrecognized field is silently ignored (no error, no sort)
+            rather than rejected.
+        filters: additional filter parameters beyond the named arguments
+            above - call describe_filters("build_item") to see what's
+            available, e.g. filters={"output": null} for allocations not
+            yet installed into a specific build output.
         limit: maximum number of results to return (capped at 100).
         offset: pagination offset.
     """
@@ -181,6 +205,8 @@ async def list_build_items(
         base["build"] = build
     if part is not None:
         base["part"] = part
+    if ordering is not None:
+        base["ordering"] = ordering
 
     params = build_query_params(base, filters, limit, offset)
 

@@ -14,6 +14,7 @@ async def list_stock_items(
     part: int | None = None,
     location: int | None = None,
     in_stock: bool | None = None,
+    ordering: str | None = None,
     filters: dict[str, Any] | None = None,
     limit: int = 25,
     offset: int = 0,
@@ -33,9 +34,16 @@ async def list_stock_items(
             currently mid-build, and in an "available" status (excludes e.g.
             rejected/destroyed/lost stock). False for the inverse. Omit to
             include both.
-        filters: additional filter/ordering parameters beyond the named arguments
-            above - call describe_filters("stock") to see what's available, e.g.
-            filters={"low_stock": true, "ordering": "-quantity"}.
+        ordering: field to sort results by, e.g. "-quantity" for highest
+            quantity first ('-' prefix for descending, omit it for
+            ascending). Combine with limit to get a "top N by X" result, e.g.
+            ordering="-quantity", limit=5 for the 5 largest stock items. Call
+            describe_filters("stock") and check its ordering_fields list for
+            valid values - an unrecognized field is silently ignored (no
+            error, no sort) rather than rejected.
+        filters: additional filter parameters beyond the named arguments
+            above - call describe_filters("stock") to see what's available,
+            e.g. filters={"low_stock": true}.
         limit: maximum number of results to return (capped at 100).
         offset: pagination offset.
     """
@@ -48,6 +56,8 @@ async def list_stock_items(
         base["location"] = location
     if in_stock is not None:
         base["in_stock"] = in_stock
+    if ordering is not None:
+        base["ordering"] = ordering
 
     params = build_query_params(base, filters, limit, offset)
 
