@@ -34,7 +34,7 @@ from order.models import (
     SalesOrderShipment,
 )
 from part.api import PartList
-from part.models import BomItem, Part, PartCategory
+from part.models import BomItem, BomItemSubstitute, Part, PartCategory
 from part.serializers import PartSerializer
 from plugin import registry
 from stock.models import StockItem, StockLocation
@@ -46,6 +46,12 @@ from .proxy import call_view
 from .schema_introspection import paginated_schema, serializer_schema
 from .settings import get_plugin_setting
 from .tools._common import DEFAULT_LIMIT, MAX_LIMIT, build_query_params, clamp_limit
+from .tools.bom import (
+    get_bom_item,
+    get_bom_substitute,
+    list_bom_items,
+    list_bom_substitutes,
+)
 from .tools.build_orders import (
     get_build_item,
     get_build_line,
@@ -180,7 +186,10 @@ class MCPToolPermissionTest(InvenTreeTestCase):
 
         # --- Build order fixtures ---
         cls.assembly_part = Part.objects.create(
-            name="Test Assembly", description="Assembly for MCP tests", assembly=True
+            name="Test Assembly",
+            description="Assembly for MCP tests",
+            assembly=True,
+            is_template=True,
         )
         # MPTT's tree_id assignment for new root nodes can collide across
         # separate TestCase classes in the same test run (a pre-existing
@@ -201,6 +210,27 @@ class MCPToolPermissionTest(InvenTreeTestCase):
         cls.build_line = cls.build.build_lines.first()
         cls.build_item = BuildItem.objects.create(
             build_line=cls.build_line, stock_item=cls.allocation_stock_item, quantity=1
+        )
+
+        # --- BOM fixtures ---
+        # Mark cls.bom_item inherited so it's picked up by variant parts too
+        # - this is the case list_bom_items(part=...) has to resolve
+        # specially, see tools/bom.py's module docstring.
+        cls.bom_item.inherited = True
+        cls.bom_item.save()
+        cls.assembly_variant = Part.objects.create(
+            name="Test Assembly Variant",
+            description="Variant of the assembly, for inherited-BOM tests",
+            variant_of=cls.assembly_part,
+            assembly=True,
+        )
+        cls.substitute_part = Part.objects.create(
+            name="Test Substitute Part",
+            description="A substitute component for MCP tests",
+            component=True,
+        )
+        cls.bom_substitute = BomItemSubstitute.objects.create(
+            bom_item=cls.bom_item, part=cls.substitute_part
         )
 
         # A second user, deliberately given no roles at all.
@@ -554,6 +584,62 @@ class MCPToolPermissionTest(InvenTreeTestCase):
         with self.assertRaises(ToolError):
             await get_build_item(self.build_item.pk)
 
+    async def test_authorized_user_can_list_and_get_bom_items(self):
+        self._as(self.user)
+
+        listed = await list_bom_items(part=self.assembly_part.pk)
+        ids = [item["pk"] for item in listed["results"]]
+        self.assertIn(self.bom_item.pk, ids)
+
+        detail = await get_bom_item(self.bom_item.pk)
+        self.assertEqual(detail["sub_part"], self.part.pk)
+
+    async def test_list_bom_items_resolves_inherited_rows_for_variants(self):
+        """A BomItem marked inherited=True must show up when querying a *variant*
+        of the part it's defined on, not just that part itself - and the
+        returned row's own `part` field stays the template's ID, not the
+        variant's (see tools/bom.py's module docstring).
+        """
+        self._as(self.user)
+
+        listed = await list_bom_items(part=self.assembly_variant.pk)
+        rows = {item["pk"]: item for item in listed["results"]}
+
+        self.assertIn(self.bom_item.pk, rows)
+        inherited_row = rows[self.bom_item.pk]
+        self.assertTrue(inherited_row["inherited"])
+        self.assertEqual(inherited_row["part"], self.assembly_part.pk)
+        self.assertNotEqual(inherited_row["part"], self.assembly_variant.pk)
+
+    async def test_list_bom_items_uses_filter_finds_consuming_assemblies(self):
+        self._as(self.user)
+
+        listed = await list_bom_items(uses=self.part.pk)
+        ids = [item["pk"] for item in listed["results"]]
+        self.assertIn(self.bom_item.pk, ids)
+
+    async def test_authorized_user_can_list_and_get_bom_substitutes(self):
+        self._as(self.user)
+
+        listed = await list_bom_substitutes(bom_item=self.bom_item.pk)
+        ids = [sub["pk"] for sub in listed["results"]]
+        self.assertIn(self.bom_substitute.pk, ids)
+
+        detail = await get_bom_substitute(self.bom_substitute.pk)
+        self.assertEqual(detail["part"], self.substitute_part.pk)
+
+    async def test_unauthorized_user_cannot_access_bom_data(self):
+        self._as(self.no_access_user)
+
+        with self.assertRaises(ToolError):
+            await list_bom_items()
+        with self.assertRaises(ToolError):
+            await get_bom_item(self.bom_item.pk)
+        with self.assertRaises(ToolError):
+            await list_bom_substitutes()
+        with self.assertRaises(ToolError):
+            await get_bom_substitute(self.bom_substitute.pk)
+
     async def test_authorized_user_can_list_and_get_companies(self):
         self._as(self.user)
 
@@ -787,6 +873,17 @@ class DescribeFiltersTest(InvenTreeTestCase):
 
         self.assertIn("is_supplier", describe_filters("company")["filters"])
         self.assertIn("has_stock", describe_filters("supplier_part")["filters"])
+
+    def test_describe_filters_covers_bom_resources(self):
+        result = describe_filters("bom_item")
+        self.assertIn("inherited", result["filters"])
+        self.assertIn("uses", result["filters"])
+        self.assertIn("allow_variants", result["filters"])
+
+        self.assertEqual(
+            describe_filters("bom_substitute")["filters"],
+            {"part": {"type": "integer (id)"}, "bom_item": {"type": "integer (id)"}},
+        )
 
     def test_describe_filters_covers_filterset_fields_shorthand(self):
         """Contact/AddressList use DRF's filterset_fields shorthand, not a full
