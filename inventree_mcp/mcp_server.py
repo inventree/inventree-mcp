@@ -29,6 +29,7 @@ mcp = FastMCP(
 # already-registered tools. See output_schemas.py.
 from . import output_schemas
 from .tools import (  # noqa: F401
+    bom,
     build_orders,
     categories,
     companies,

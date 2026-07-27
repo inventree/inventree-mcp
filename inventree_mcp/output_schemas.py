@@ -47,7 +47,12 @@ from order.serializers import (
     SalesOrderLineItemSerializer,
     SalesOrderSerializer,
 )
-from part.serializers import CategorySerializer, PartSerializer
+from part.serializers import (
+    BomItemSerializer,
+    BomItemSubstituteSerializer,
+    CategorySerializer,
+    PartSerializer,
+)
 from pydantic import RootModel
 from stock.serializers import LocationSerializer, StockItemSerializer
 
@@ -91,6 +96,10 @@ _OUTPUT_SCHEMAS = {
     "get_manufacturer_part": serializer_schema(ManufacturerPartSerializer),
     "list_supplier_parts": paginated_schema(SupplierPartSerializer),
     "get_supplier_part": serializer_schema(SupplierPartSerializer),
+    "list_bom_items": paginated_schema(BomItemSerializer),
+    "get_bom_item": serializer_schema(BomItemSerializer),
+    "list_bom_substitutes": paginated_schema(BomItemSubstituteSerializer),
+    "get_bom_substitute": serializer_schema(BomItemSubstituteSerializer),
 }
 
 
