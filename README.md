@@ -29,9 +29,7 @@ part, a stock item, an order, ...) rather than being tied to one resource type -
 [`inventree_mcp/tools/attachments.py`](inventree_mcp/tools/attachments.py) and
 [`inventree_mcp/tools/parameters.py`](inventree_mcp/tools/parameters.py) for the exact
 `model_type`/`model_id` scoping mechanism (the two use different `model_type` string formats -
-documented in each module). Reads for both are gated only by authentication, not by the linked
-record's own view permission - this mirrors real InvenTree API behavior, not a plugin-specific
-gap.
+documented in each module).
 
 Each `outputSchema` is generated from the real InvenTree serializer (not hand-maintained), so it
 can't drift from the actual API shape as InvenTree evolves. Every list tool also takes `ordering`

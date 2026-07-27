@@ -6,10 +6,6 @@ file or external URL to almost any other InvenTree record via a
 attachment table. See list_attachments' docstring for the exact
 `model_type` string format this uses, and note it differs from
 `parameters.py`'s.
-
-**Read access is not gated by the target record's own view permission** -
-see list_attachments' docstring for why, and don't assume the usual
-per-resource role check applies here.
 """
 
 from __future__ import annotations
@@ -38,14 +34,6 @@ async def list_attachments(
     manufacturer/supplier parts, sales order shipments. Pass both
     `model_type` and `model_id` together to see everything attached to one
     specific record, e.g. "what's attached to part 42?".
-
-    Read access here is NOT gated by the target record's own view
-    permission, unlike every other resource in this plugin - any
-    authenticated caller can list/get any attachment regardless of whether
-    they could view the part/order/etc it's attached to. This is real
-    InvenTree API behavior (the underlying view has no role-based
-    permission check for reads, only authentication), not a gap introduced
-    by this plugin - it faithfully proxies the real view either way.
 
     Returns a paginated envelope: {count, next, previous, results}. Each
     entry in `results` has the same shape as get_attachment's return value -
@@ -111,9 +99,8 @@ async def get_attachment(attachment_id: int) -> dict:
         attachment_id: the Attachment's database ID.
 
     Raises:
-        ToolError: no attachment exists with that ID. Note there is no
-            permission check to fail here beyond authentication - see
-            list_attachments' docstring.
+        ToolError: no attachment exists with that ID, or the caller doesn't
+            have permission to view it.
     """
     from common.api import AttachmentDetail
 

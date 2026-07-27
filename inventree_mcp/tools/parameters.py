@@ -9,10 +9,6 @@ see list_parameter_templates.
 
 See list_parameters' docstring for the exact `model_type` string format
 this uses, and note it differs from `attachments.py`'s.
-
-**Read access is not gated by the target record's own view permission** -
-see list_parameters' docstring for why, and don't assume the usual
-per-resource role check applies here.
 """
 
 from __future__ import annotations
@@ -43,14 +39,6 @@ async def list_parameters(
     see everything recorded for one specific record, e.g. "what are part
     42's parameters?". Each entry's `template` links to a ParameterTemplate
     (see list_parameter_templates) which defines the parameter's name/units.
-
-    Read access here is NOT gated by the target record's own view
-    permission, unlike every other resource in this plugin - any
-    authenticated caller can list/get any parameter regardless of whether
-    they could view the part/category/etc it's recorded against. This is
-    real InvenTree API behavior (the underlying view has no role-based
-    permission check for reads, only authentication), not a gap introduced
-    by this plugin - it faithfully proxies the real view either way.
 
     Returns a paginated envelope: {count, next, previous, results}. Each
     entry in `results` has the same shape as get_parameter's return value -
@@ -115,9 +103,8 @@ async def get_parameter(parameter_id: int) -> dict:
         parameter_id: the Parameter's database ID.
 
     Raises:
-        ToolError: no parameter exists with that ID. Note there is no
-            permission check to fail here beyond authentication - see
-            list_parameters' docstring.
+        ToolError: no parameter exists with that ID, or the caller doesn't
+            have permission to view it.
     """
     from common.api import ParameterDetail
 
@@ -187,9 +174,8 @@ async def get_parameter_template(template_id: int) -> dict:
         template_id: the ParameterTemplate's database ID.
 
     Raises:
-        ToolError: no parameter template exists with that ID. Note there is
-            no permission check to fail here beyond authentication - see
-            list_parameters' docstring.
+        ToolError: no parameter template exists with that ID, or the caller
+            doesn't have permission to view it.
     """
     from common.api import ParameterTemplateDetail
 
