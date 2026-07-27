@@ -33,6 +33,11 @@ from __future__ import annotations
 from typing import Any
 
 from build.serializers import BuildItemSerializer, BuildLineSerializer, BuildSerializer
+from common.serializers import (
+    AttachmentSerializer,
+    ParameterSerializer,
+    ParameterTemplateSerializer,
+)
 from company.serializers import (
     AddressSerializer,
     CompanySerializer,
@@ -100,6 +105,12 @@ _OUTPUT_SCHEMAS = {
     "get_bom_item": serializer_schema(BomItemSerializer),
     "list_bom_substitutes": paginated_schema(BomItemSubstituteSerializer),
     "get_bom_substitute": serializer_schema(BomItemSubstituteSerializer),
+    "list_attachments": paginated_schema(AttachmentSerializer),
+    "get_attachment": serializer_schema(AttachmentSerializer),
+    "list_parameters": paginated_schema(ParameterSerializer),
+    "get_parameter": serializer_schema(ParameterSerializer),
+    "list_parameter_templates": paginated_schema(ParameterTemplateSerializer),
+    "get_parameter_template": serializer_schema(ParameterTemplateSerializer),
 }
 
 

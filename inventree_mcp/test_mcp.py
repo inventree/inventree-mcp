@@ -18,8 +18,10 @@ from unittest.mock import patch
 import jsonschema
 from asgiref.sync import sync_to_async
 from build.models import Build, BuildItem
+from common.models import Attachment, Parameter, ParameterTemplate
 from company.models import Address, Company, Contact, ManufacturerPart, SupplierPart
 from django.contrib.auth import get_user_model
+from django.contrib.contenttypes.models import ContentType
 from django.test import Client, override_settings
 from django.utils import timezone
 from InvenTree.unit_test import InvenTreeTestCase
@@ -47,6 +49,7 @@ from .proxy import call_view
 from .schema_introspection import paginated_schema, serializer_schema
 from .settings import get_plugin_setting
 from .tools._common import DEFAULT_LIMIT, MAX_LIMIT, build_query_params, clamp_limit
+from .tools.attachments import get_attachment, list_attachments
 from .tools.bom import (
     get_bom_item,
     get_bom_substitute,
@@ -72,6 +75,12 @@ from .tools.companies import (
 )
 from .tools.discovery import describe_filters
 from .tools.locations import get_location, list_locations
+from .tools.parameters import (
+    get_parameter,
+    get_parameter_template,
+    list_parameter_templates,
+    list_parameters,
+)
 from .tools.parts import get_part, list_parts
 from .tools.purchase_orders import (
     get_purchase_order,
@@ -234,6 +243,30 @@ class MCPToolPermissionTest(InvenTreeTestCase):
             bom_item=cls.bom_item, part=cls.substitute_part
         )
 
+        # --- Attachment/Parameter fixtures ---
+        # Both model_type fields are real ContentType FKs at the ORM level,
+        # despite each serializing over the wire as a plain string in a
+        # *different* format per resource - see tools/attachments.py's and
+        # tools/parameters.py's module docstrings for why they're not
+        # interchangeable.
+        cls.attachment = Attachment.objects.create(
+            model_type="part",
+            model_id=cls.part.pk,
+            link="https://example.org/datasheet.pdf",
+            comment="Test datasheet",
+        )
+        cls.parameter_template = ParameterTemplate.objects.create(
+            name="Resistance",
+            units="ohm",
+            model_type=ContentType.objects.get_for_model(Part),
+        )
+        cls.parameter = Parameter.objects.create(
+            model_type=ContentType.objects.get_for_model(Part),
+            model_id=cls.part.pk,
+            template=cls.parameter_template,
+            data="100",
+        )
+
         # A second user, deliberately given no roles at all.
         cls.no_access_user = get_user_model().objects.create_user(
             username="noaccess", password="password", email="noaccess@example.org"
@@ -393,6 +426,9 @@ class MCPToolPermissionTest(InvenTreeTestCase):
             "supplier_part": list_supplier_parts,
             "bom_item": list_bom_items,
             "bom_substitute": list_bom_substitutes,
+            "attachment": list_attachments,
+            "parameter": list_parameters,
+            "parameter_template": list_parameter_templates,
         }
 
         for resource, tool_fn in list_tools_by_resource.items():
@@ -711,6 +747,82 @@ class MCPToolPermissionTest(InvenTreeTestCase):
         with self.assertRaises(ToolError):
             await get_bom_substitute(self.bom_substitute.pk)
 
+    async def test_authorized_user_can_list_and_get_attachments(self):
+        self._as(self.user)
+
+        listed = await list_attachments(model_type="part", model_id=self.part.pk)
+        ids = [a["pk"] for a in listed["results"]]
+        self.assertIn(self.attachment.pk, ids)
+
+        detail = await get_attachment(self.attachment.pk)
+        self.assertEqual(detail["comment"], "Test datasheet")
+
+        # cls.attachment is a link, not an uploaded file, so is_image=False
+        # must include it and is_image=True must exclude it.
+        not_images = await list_attachments(is_image=False)
+        self.assertIn(self.attachment.pk, [a["pk"] for a in not_images["results"]])
+        images_only = await list_attachments(is_image=True)
+        self.assertNotIn(self.attachment.pk, [a["pk"] for a in images_only["results"]])
+
+    async def test_unauthorized_user_can_still_read_attachments(self):
+        """Deliberately the opposite assertion from every other resource's denial test.
+
+        AttachmentList/Detail have no RolePermission/RuleSet gate on reads -
+        only IsAuthenticatedOrReadScope (any authenticated user) - see
+        tools/attachments.py's module docstring. A zero-role user must still
+        succeed here; asserting ToolError (the pattern used everywhere else
+        in this file) would be testing for the wrong thing and would mask a
+        real regression if this view's permissions ever tightened.
+        """
+        self._as(self.no_access_user)
+
+        listed = await list_attachments(model_type="part", model_id=self.part.pk)
+        ids = [a["pk"] for a in listed["results"]]
+        self.assertIn(self.attachment.pk, ids)
+
+        detail = await get_attachment(self.attachment.pk)
+        self.assertEqual(detail["pk"], self.attachment.pk)
+
+    async def test_authorized_user_can_list_and_get_parameters(self):
+        self._as(self.user)
+
+        listed = await list_parameters(model_type="part.part", model_id=self.part.pk)
+        ids = [p["pk"] for p in listed["results"]]
+        self.assertIn(self.parameter.pk, ids)
+
+        detail = await get_parameter(self.parameter.pk)
+        self.assertEqual(detail["data"], "100")
+
+        by_template = await list_parameters(template=self.parameter_template.pk)
+        self.assertIn(self.parameter.pk, [p["pk"] for p in by_template["results"]])
+
+    async def test_authorized_user_can_list_and_get_parameter_templates(self):
+        self._as(self.user)
+
+        listed = await list_parameter_templates(search="Resistance")
+        names = [t["name"] for t in listed["results"]]
+        self.assertIn("Resistance", names)
+
+        detail = await get_parameter_template(self.parameter_template.pk)
+        self.assertEqual(detail["units"], "ohm")
+
+    async def test_unauthorized_user_can_still_read_parameters(self):
+        """Same "opposite of every other resource" case as attachments, above -
+        ParameterList/Detail and ParameterTemplateList/Detail have no
+        RolePermission/RuleSet gate on reads either.
+        """
+        self._as(self.no_access_user)
+
+        listed = await list_parameters(model_type="part.part", model_id=self.part.pk)
+        ids = [p["pk"] for p in listed["results"]]
+        self.assertIn(self.parameter.pk, ids)
+
+        detail = await get_parameter(self.parameter.pk)
+        self.assertEqual(detail["pk"], self.parameter.pk)
+
+        templates = await list_parameter_templates()
+        self.assertTrue(templates["results"])
+
     async def test_authorized_user_can_list_and_get_companies(self):
         self._as(self.user)
 
@@ -955,6 +1067,20 @@ class DescribeFiltersTest(InvenTreeTestCase):
             describe_filters("bom_substitute")["filters"],
             {"part": {"type": "integer (id)"}, "bom_item": {"type": "integer (id)"}},
         )
+
+    def test_describe_filters_covers_attachment_and_parameter_resources(self):
+        attachment_filters = describe_filters("attachment")["filters"]
+        self.assertIn("model_type", attachment_filters)
+        self.assertIn("model_id", attachment_filters)
+        self.assertIn("is_image", attachment_filters)
+
+        parameter_filters = describe_filters("parameter")["filters"]
+        self.assertIn("model_id", parameter_filters)
+        self.assertIn("template", parameter_filters)
+
+        template_filters = describe_filters("parameter_template")["filters"]
+        self.assertIn("units", template_filters)
+        self.assertIn("has_choices", template_filters)
 
     def test_describe_filters_covers_filterset_fields_shorthand(self):
         """Contact/AddressList use DRF's filterset_fields shorthand, not a full
