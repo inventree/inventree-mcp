@@ -88,10 +88,20 @@ jobs:
           # django_slowtests whenever 'manage.py test' is run, but that
           # package isn't part of the base inventree/inventree image.
           HOME=/root pip3 install django_slowtests==1.1.1
-          HOME=/root pip3 install -e $GITHUB_WORKSPACE
+          HOME=/root pip3 install -e "$GITHUB_WORKSPACE[test]"
           HOME=/root invoke migrate
 
       - name: Run Tests
         run: |
           cd /home/inventree/src/backend
-          HOME=/root python InvenTree/manage.py test inventree_mcp.test_mcp
+          HOME=/root python -m coverage run --rcfile="$GITHUB_WORKSPACE/pyproject.toml" InvenTree/manage.py test inventree_mcp.test_mcp
+          HOME=/root python -m coverage xml -i --rcfile="$GITHUB_WORKSPACE/pyproject.toml" -o "$GITHUB_WORKSPACE/coverage.xml"
+
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
+        if: always()
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          slug: inventree/inventree-mcp
+          files: coverage.xml
+          flags: integration-tests

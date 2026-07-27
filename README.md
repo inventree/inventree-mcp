@@ -1,5 +1,8 @@
 # InvenTreeMCP
 
+[![CI](https://github.com/inventree/inventree-mcp/actions/workflows/ci.yaml/badge.svg)](https://github.com/inventree/inventree-mcp/actions/workflows/ci.yaml)
+[![codecov](https://codecov.io/gh/inventree/inventree-mcp/graph/badge.svg)](https://codecov.io/gh/inventree/inventree-mcp)
+
 An MCP (Model Context Protocol) server for InvenTree, exposed as an InvenTree plugin. It lets MCP
 clients (Claude Desktop, other MCP-aware agents) query InvenTree inventory data over a Streamable
 HTTP endpoint.
