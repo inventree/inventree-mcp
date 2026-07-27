@@ -41,6 +41,7 @@ from stock.models import StockItem, StockLocation
 from users.models import ApiToken
 
 from . import context
+from .filter_introspection import _default_ordering_fields
 from .mcp_server import mcp
 from .proxy import call_view
 from .schema_introspection import paginated_schema, serializer_schema
@@ -359,6 +360,50 @@ class MCPToolPermissionTest(InvenTreeTestCase):
         )
         self.assertEqual(len(top_one["results"]), 1)
         self.assertEqual(top_one["results"][0]["pk"], self.allocation_stock_item.pk)
+
+    async def test_ordering_argument_reaches_every_list_tool(self):
+        """The deep sort-order tests above only exercise list_stock_items - every other
+        list tool's own `if ordering is not None: base["ordering"] = ordering` line
+        still needs at least one real call with ordering set, or it's dead code as
+        far as the test suite can tell. Spot-checks all 19 list tools at once.
+
+        Uses each resource's own real ordering_fields (via describe_filters) rather
+        than a hardcoded field name per tool, so this can't silently drift out of
+        sync if a wrapped view's declared ordering_fields ever change.
+        """
+        self._as(self.user)
+
+        list_tools_by_resource = {
+            "part": list_parts,
+            "category": list_categories,
+            "stock": list_stock_items,
+            "location": list_locations,
+            "purchase_order": list_purchase_orders,
+            "purchase_order_line": list_purchase_order_lines,
+            "sales_order": list_sales_orders,
+            "sales_order_line": list_sales_order_lines,
+            "sales_order_allocation": list_sales_order_allocations,
+            "build_order": list_build_orders,
+            "build_line": list_build_lines,
+            "build_item": list_build_items,
+            "company": list_companies,
+            "contact": list_contacts,
+            "address": list_addresses,
+            "manufacturer_part": list_manufacturer_parts,
+            "supplier_part": list_supplier_parts,
+            "bom_item": list_bom_items,
+            "bom_substitute": list_bom_substitutes,
+        }
+
+        for resource, tool_fn in list_tools_by_resource.items():
+            ordering_fields = describe_filters(resource)["ordering_fields"]
+            self.assertTrue(
+                ordering_fields, f"{resource} reports no ordering_fields to test with"
+            )
+            result = await tool_fn(ordering=ordering_fields[0], limit=1)
+            self.assertIn(
+                "results", result, f"{resource}'s list tool rejected `ordering`"
+            )
 
     async def test_authorized_user_can_list_and_get_locations(self):
         self._as(self.user)
@@ -953,6 +998,66 @@ class DescribeFiltersTest(InvenTreeTestCase):
         self.assertEqual(
             describe_filters("bom_item")["ordering_fields"][:1], ["can_build"]
         )
+
+
+class DefaultOrderingFieldsTest(unittest.TestCase):
+    """Direct unit tests for filter_introspection._default_ordering_fields()'s edge cases.
+
+    Every real view wrapped by this plugin either declares `ordering_fields`
+    explicitly or (BomItemSubstituteList, covered above via describe_filters)
+    has a serializer that instantiates cleanly with no write_only/wildcard
+    fields - so the defensive branches below (no serializer_class at all, a
+    serializer that can't be bare-instantiated, write_only/source='*' fields
+    to skip) aren't reachable through any currently-wrapped resource. Plain
+    unittest.TestCase against synthetic fixtures, same pattern as
+    ClampLimitTest/BuildQueryParamsTest below - no DB needed since this
+    function only introspects a serializer class.
+    """
+
+    def test_view_without_serializer_class_returns_empty(self):
+        class FakeView:
+            pass
+
+        self.assertEqual(_default_ordering_fields(FakeView), [])
+
+    def test_serializer_that_cannot_be_bare_instantiated_fails_soft(self):
+        class RequiresArgsSerializer:
+            def __init__(self, *args, **kwargs):
+                raise TypeError("this serializer needs constructor args")
+
+        class FakeView:
+            serializer_class = RequiresArgsSerializer
+
+        self.assertEqual(_default_ordering_fields(FakeView), [])
+
+    def test_serializer_assertion_error_fails_soft(self):
+        class MisconfiguredSerializer:
+            def __init__(self, *args, **kwargs):
+                raise AssertionError("e.g. a ModelSerializer missing Meta.model")
+
+        class FakeView:
+            serializer_class = MisconfiguredSerializer
+
+        self.assertEqual(_default_ordering_fields(FakeView), [])
+
+    def test_write_only_and_wildcard_source_fields_are_excluded(self):
+        class FakeField:
+            def __init__(self, source, write_only=False):
+                self.source = source
+                self.write_only = write_only
+
+        class FakeSerializer:
+            def __init__(self):
+                self.fields = {
+                    "password": FakeField("password", write_only=True),
+                    "computed": FakeField("*"),
+                    "name": FakeField("name"),
+                }
+
+        class FakeView:
+            serializer_class = FakeSerializer
+
+        self.assertEqual(_default_ordering_fields(FakeView), ["name"])
 
 
 @override_settings(PLUGIN_TESTING_SETUP=True)
