@@ -13,6 +13,7 @@ from ._common import build_query_params
 async def list_locations(
     search: str | None = None,
     parent: int | None = None,
+    ordering: str | None = None,
     filters: dict[str, Any] | None = None,
     limit: int = 25,
     offset: int = 0,
@@ -32,7 +33,12 @@ async def list_locations(
             instead, or filters={"parent": <id>, "cascade": true} to get all
             descendants of a specific location rather than just its direct
             children.
-        filters: additional filter/ordering parameters beyond the named arguments
+        ordering: field to sort results by, e.g. "name" ('-' prefix for
+            descending, omit it for ascending). Call describe_filters("location")
+            and check its ordering_fields list for valid values - an
+            unrecognized field is silently ignored (no error, no sort) rather
+            than rejected.
+        filters: additional filter parameters beyond the named arguments
             above - call describe_filters("location") to see what's available.
         limit: maximum number of results to return (capped at 100).
         offset: pagination offset.
@@ -44,6 +50,8 @@ async def list_locations(
         base["search"] = search
     if parent is not None:
         base["parent"] = parent
+    if ordering is not None:
+        base["ordering"] = ordering
 
     params = build_query_params(base, filters, limit, offset)
 

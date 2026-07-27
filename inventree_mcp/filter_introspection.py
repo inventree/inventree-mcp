@@ -106,6 +106,48 @@ def _model_field_filters(view_cls: type) -> dict[str, Any]:
     return filters
 
 
+def _default_ordering_fields(view_cls: type) -> list[str]:
+    """Best-effort reproduction of DRF's own fallback for views that don't declare `ordering_fields`.
+
+    `rest_framework.filters.OrderingFilter.get_default_valid_fields()` doesn't
+    treat a missing `ordering_fields` as "no ordering allowed" - it allows
+    ordering by any non-write-only field on the view's serializer instead.
+    Before this, `describe_filterset()` read `getattr(view_cls,
+    'ordering_fields', None) or []`, which couldn't distinguish "not declared"
+    from "declared empty" and reported zero ordering fields either way - e.g.
+    `describe_filters("bom_substitute")` claimed no ordering was possible even
+    though `ordering=part` genuinely works against the real API
+    (`BomItemSubstituteList` doesn't declare `ordering_fields`). Mirrors DRF's
+    logic rather than calling it directly: DRF's version needs a bound view
+    *instance* (`view.get_serializer_class()`), but this module only ever has
+    the view *class* to introspect with, same constraint as the rest of this
+    file.
+    """
+    serializer_class = getattr(view_cls, "serializer_class", None)
+    if serializer_class is None:
+        return []
+
+    try:
+        fields = serializer_class().fields
+    except (TypeError, AssertionError):
+        # TypeError: constructor needs args this bare instantiation can't
+        # supply. AssertionError: DRF's own internal checks (e.g. a
+        # ModelSerializer subclass missing Meta.model). Fail soft to "no
+        # ordering fields reported" rather than raising out of a pure
+        # introspection helper.
+        return []
+
+    ordering_fields: list[str] = []
+    for field in fields.values():
+        if getattr(field, "write_only", False) or field.source == "*":
+            continue
+        source = field.source.replace(".", "__")
+        if source not in ordering_fields:
+            ordering_fields.append(source)
+
+    return ordering_fields
+
+
 def describe_filterset(view_cls: type) -> dict[str, Any]:
     """Describe the search/filter/ordering options available on *view_cls*.
 
@@ -116,8 +158,11 @@ def describe_filterset(view_cls: type) -> dict[str, Any]:
     Returns:
         A dict with:
         - search_fields: fields matched by a free-text `search` query param.
-        - ordering_fields: fields usable via an `ordering` filter (prefix
-          with '-' for descending).
+        - ordering_fields: fields usable as the corresponding list tool's
+          `ordering` argument (prefix with '-' for descending). If the view
+          doesn't declare `ordering_fields` at all, this reports DRF's own
+          fallback (any readable serializer field) rather than an empty list
+          - see _default_ordering_fields().
         - filters: {name: {type, label, choices}} - each key is usable
           directly as a query parameter / filters dict entry.
     """
@@ -130,8 +175,15 @@ def describe_filterset(view_cls: type) -> dict[str, Any]:
     else:
         filters = _model_field_filters(view_cls)
 
+    declared_ordering = getattr(view_cls, "ordering_fields", None)
+    ordering_fields = (
+        list(declared_ordering)
+        if declared_ordering is not None
+        else _default_ordering_fields(view_cls)
+    )
+
     return {
         "search_fields": list(getattr(view_cls, "search_fields", None) or []),
-        "ordering_fields": list(getattr(view_cls, "ordering_fields", None) or []),
+        "ordering_fields": ordering_fields,
         "filters": filters,
     }

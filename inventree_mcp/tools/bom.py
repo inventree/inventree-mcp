@@ -33,6 +33,7 @@ async def list_bom_items(
     part: int | None = None,
     uses: int | None = None,
     category: int | None = None,
+    ordering: str | None = None,
     filters: dict[str, Any] | None = None,
     limit: int = 25,
     offset: int = 0,
@@ -65,11 +66,18 @@ async def list_bom_items(
             part?" as opposed to `part`'s "what does this assembly use?".
         category: restrict to BOM items whose component (sub_part) belongs
             to this PartCategory ID (includes subcategories).
-        filters: additional filter/ordering parameters beyond the named
-            arguments above - call describe_filters("bom_item") to see
-            what's available, e.g. filters={"validated": false} for lines
-            whose checksum hasn't been confirmed, or
-            filters={"available_stock": true}.
+        ordering: field to sort results by, e.g. "-quantity" for the
+            largest-quantity components first ('-' prefix for descending,
+            omit it for ascending). Combine with limit to get a "top N by X"
+            result, e.g. ordering="-quantity", limit=5 for the 5 highest-
+            quantity components of an assembly. Call
+            describe_filters("bom_item") and check its ordering_fields list
+            for valid values - an unrecognized field is silently ignored (no
+            error, no sort) rather than rejected.
+        filters: additional filter parameters beyond the named arguments
+            above - call describe_filters("bom_item") to see what's
+            available, e.g. filters={"validated": false} for lines whose
+            checksum hasn't been confirmed, or filters={"available_stock": true}.
         limit: maximum number of results to return (capped at 100).
         offset: pagination offset.
     """
@@ -82,6 +90,8 @@ async def list_bom_items(
         base["uses"] = uses
     if category is not None:
         base["category"] = category
+    if ordering is not None:
+        base["ordering"] = ordering
 
     params = build_query_params(base, filters, limit, offset)
 
@@ -112,6 +122,7 @@ async def get_bom_item(bom_item_id: int) -> dict:
 async def list_bom_substitutes(
     bom_item: int | None = None,
     part: int | None = None,
+    ordering: str | None = None,
     filters: dict[str, Any] | None = None,
     limit: int = 25,
     offset: int = 0,
@@ -131,9 +142,14 @@ async def list_bom_substitutes(
     Args:
         bom_item: restrict to substitutes defined for this BomItem ID.
         part: restrict to substitute entries permitting this Part ID.
-        filters: additional filter/ordering parameters beyond the named
-            arguments above - call describe_filters("bom_substitute") to
-            see what's available.
+        ordering: field to sort results by ('-' prefix for descending, omit
+            it for ascending). Call describe_filters("bom_substitute") and
+            check its ordering_fields list for valid values - an
+            unrecognized field is silently ignored (no error, no sort)
+            rather than rejected.
+        filters: additional filter parameters beyond the named arguments
+            above - call describe_filters("bom_substitute") to see what's
+            available.
         limit: maximum number of results to return (capped at 100).
         offset: pagination offset.
     """
@@ -144,6 +160,8 @@ async def list_bom_substitutes(
         base["bom_item"] = bom_item
     if part is not None:
         base["part"] = part
+    if ordering is not None:
+        base["ordering"] = ordering
 
     params = build_query_params(base, filters, limit, offset)
 

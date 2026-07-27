@@ -14,6 +14,7 @@ async def list_purchase_orders(
     supplier: int | None = None,
     status: int | None = None,
     outstanding: bool | None = None,
+    ordering: str | None = None,
     filters: dict[str, Any] | None = None,
     limit: int = 25,
     offset: int = 0,
@@ -34,9 +35,16 @@ async def list_purchase_orders(
             for the common cases instead.
         outstanding: True for orders that are still open (not yet
             complete/cancelled), False for the inverse. Omit to include both.
-        filters: additional filter/ordering parameters beyond the named
-            arguments above - call describe_filters("purchase_order") to see
-            what's available, e.g. filters={"overdue": true, "ordering": "-target_date"}.
+        ordering: field to sort results by, e.g. "-target_date" for the
+            orders due soonest first ('-' prefix for descending, omit it for
+            ascending). Combine with limit to get a "top N by X" result, e.g.
+            ordering="target_date", limit=5 for the 5 most overdue open
+            orders. Call describe_filters("purchase_order") and check its
+            ordering_fields list for valid values - an unrecognized field is
+            silently ignored (no error, no sort) rather than rejected.
+        filters: additional filter parameters beyond the named arguments
+            above - call describe_filters("purchase_order") to see what's
+            available, e.g. filters={"overdue": true}.
         limit: maximum number of results to return (capped at 100).
         offset: pagination offset.
     """
@@ -49,6 +57,8 @@ async def list_purchase_orders(
         base["status"] = status
     if outstanding is not None:
         base["outstanding"] = outstanding
+    if ordering is not None:
+        base["ordering"] = ordering
 
     params = build_query_params(base, filters, limit, offset)
 
@@ -85,6 +95,7 @@ async def list_purchase_order_lines(
     order: int | None = None,
     part: int | None = None,
     received: bool | None = None,
+    ordering: str | None = None,
     filters: dict[str, Any] | None = None,
     limit: int = 25,
     offset: int = 0,
@@ -105,9 +116,14 @@ async def list_purchase_order_lines(
         received: True for lines that have received their full ordered
             quantity, False for lines still pending receipt. Omit to
             include both.
-        filters: additional filter/ordering parameters beyond the named
-            arguments above - call describe_filters("purchase_order_line")
-            to see what's available.
+        ordering: field to sort results by ('-' prefix for descending, omit
+            it for ascending). Call describe_filters("purchase_order_line")
+            and check its ordering_fields list for valid values - an
+            unrecognized field is silently ignored (no error, no sort)
+            rather than rejected.
+        filters: additional filter parameters beyond the named arguments
+            above - call describe_filters("purchase_order_line") to see
+            what's available.
         limit: maximum number of results to return (capped at 100).
         offset: pagination offset.
     """
@@ -120,6 +136,8 @@ async def list_purchase_order_lines(
         base["part"] = part
     if received is not None:
         base["received"] = received
+    if ordering is not None:
+        base["ordering"] = ordering
 
     params = build_query_params(base, filters, limit, offset)
 

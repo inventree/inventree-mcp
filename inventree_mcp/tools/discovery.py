@@ -174,11 +174,12 @@ def describe_filters(resource: str) -> dict:
 
     Returns a dict with:
         search_fields: fields matched by that list tool's `search` argument.
-        ordering_fields: fields usable via filters={"ordering": "<field>"}
-            (prefix with '-' for descending, e.g. "-in_stock").
+        ordering_fields: valid values for that list tool's `ordering`
+            argument (prefix with '-' for descending, e.g. "-in_stock").
+            Combine with `limit` for a "top N by X" result.
         filters: {name: {type, label, choices}} - pass any of these keys
             directly in that list tool's `filters` argument, e.g.
-            filters={"is_variant": true, "ordering": "-in_stock"}.
+            filters={"is_variant": true}.
     """
     loader = _RESOURCE_LOADERS.get(resource)
 

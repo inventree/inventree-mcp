@@ -334,6 +334,32 @@ class MCPToolPermissionTest(InvenTreeTestCase):
         detail = await get_stock_item(self.stock_item.pk)
         self.assertEqual(detail["part"], self.part.pk)
 
+    async def test_ordering_argument_sorts_results(self):
+        """The named `ordering` argument must actually sort the real queryset, not just be accepted.
+
+        cls.stock_item (quantity=10) and cls.allocation_stock_item
+        (quantity=100) share the same part - a real end-to-end check that
+        `ordering="-quantity"`/`"quantity"` changes which one comes first,
+        not just that the query param reaches the view unrejected.
+        """
+        self._as(self.user)
+
+        descending = await list_stock_items(part=self.part.pk, ordering="-quantity")
+        self.assertEqual(descending["results"][0]["pk"], self.allocation_stock_item.pk)
+
+        ascending = await list_stock_items(part=self.part.pk, ordering="quantity")
+        self.assertEqual(ascending["results"][0]["pk"], self.stock_item.pk)
+
+    async def test_ordering_combined_with_limit_gives_top_n(self):
+        """The documented "top N by X" pattern: ordering + limit together."""
+        self._as(self.user)
+
+        top_one = await list_stock_items(
+            part=self.part.pk, ordering="-quantity", limit=1
+        )
+        self.assertEqual(len(top_one["results"]), 1)
+        self.assertEqual(top_one["results"][0]["pk"], self.allocation_stock_item.pk)
+
     async def test_authorized_user_can_list_and_get_locations(self):
         self._as(self.user)
 
@@ -902,6 +928,31 @@ class DescribeFiltersTest(InvenTreeTestCase):
     def test_describe_filters_rejects_unknown_resource(self):
         with self.assertRaises(ToolError):
             describe_filters("not-a-real-resource")
+
+    def test_describe_filters_falls_back_to_default_ordering_fields(self):
+        """BomItemSubstituteList doesn't declare `ordering_fields` at all - regression
+        test for filter_introspection.py's _default_ordering_fields() fallback.
+
+        Before this, describe_filterset() read `getattr(view_cls,
+        'ordering_fields', None) or []`, which couldn't tell "not declared"
+        apart from "declared empty" and reported zero ordering fields either
+        way - even though `ordering=part` genuinely sorts the real API
+        (DRF's OrderingFilter defaults to any readable serializer field when
+        a view doesn't declare ordering_fields, it doesn't disable ordering).
+        """
+        ordering_fields = describe_filters("bom_substitute")["ordering_fields"]
+
+        self.assertIn("part", ordering_fields)
+        self.assertIn("bom_item", ordering_fields)
+        # part_detail's own source is 'part' - must be deduped to a single
+        # 'part' entry, not listed twice under two different field names.
+        self.assertEqual(ordering_fields.count("part"), 1)
+
+        # A view that *does* declare ordering_fields must be unaffected by
+        # the fallback path.
+        self.assertEqual(
+            describe_filters("bom_item")["ordering_fields"][:1], ["can_build"]
+        )
 
 
 @override_settings(PLUGIN_TESTING_SETUP=True)

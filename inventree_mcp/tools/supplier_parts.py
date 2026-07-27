@@ -18,6 +18,7 @@ from ._common import build_query_params
 async def list_manufacturer_parts(
     part: int | None = None,
     manufacturer: int | None = None,
+    ordering: str | None = None,
     filters: dict[str, Any] | None = None,
     limit: int = 25,
     offset: int = 0,
@@ -33,9 +34,14 @@ async def list_manufacturer_parts(
         part: restrict to manufacturer parts for this internal Part ID.
         manufacturer: restrict to manufacturer parts from this manufacturer
             Company ID.
-        filters: additional filter/ordering parameters beyond the named
-            arguments above - call describe_filters("manufacturer_part") to
-            see what's available, e.g. filters={"MPN": "ABC-123"}.
+        ordering: field to sort results by ('-' prefix for descending, omit
+            it for ascending). Call describe_filters("manufacturer_part")
+            and check its ordering_fields list for valid values - an
+            unrecognized field is silently ignored (no error, no sort)
+            rather than rejected.
+        filters: additional filter parameters beyond the named arguments
+            above - call describe_filters("manufacturer_part") to see
+            what's available, e.g. filters={"MPN": "ABC-123"}.
         limit: maximum number of results to return (capped at 100).
         offset: pagination offset.
     """
@@ -46,6 +52,8 @@ async def list_manufacturer_parts(
         base["part"] = part
     if manufacturer is not None:
         base["manufacturer"] = manufacturer
+    if ordering is not None:
+        base["ordering"] = ordering
 
     params = build_query_params(base, filters, limit, offset)
 
@@ -87,6 +95,7 @@ async def list_supplier_parts(
     part: int | None = None,
     supplier: int | None = None,
     manufacturer_part: int | None = None,
+    ordering: str | None = None,
     filters: dict[str, Any] | None = None,
     limit: int = 25,
     offset: int = 0,
@@ -107,9 +116,14 @@ async def list_supplier_parts(
         supplier: restrict to supplier parts from this supplier Company ID.
         manufacturer_part: restrict to supplier parts linked to this
             ManufacturerPart ID.
-        filters: additional filter/ordering parameters beyond the named
-            arguments above - call describe_filters("supplier_part") to see
-            what's available, e.g. filters={"has_stock": true} or
+        ordering: field to sort results by ('-' prefix for descending, omit
+            it for ascending). Call describe_filters("supplier_part") and
+            check its ordering_fields list for valid values - an
+            unrecognized field is silently ignored (no error, no sort)
+            rather than rejected.
+        filters: additional filter parameters beyond the named arguments
+            above - call describe_filters("supplier_part") to see what's
+            available, e.g. filters={"has_stock": true} or
             filters={"SKU": "SKU-123"}.
         limit: maximum number of results to return (capped at 100).
         offset: pagination offset.
@@ -123,6 +137,8 @@ async def list_supplier_parts(
         base["supplier"] = supplier
     if manufacturer_part is not None:
         base["manufacturer_part"] = manufacturer_part
+    if ordering is not None:
+        base["ordering"] = ordering
 
     params = build_query_params(base, filters, limit, offset)
 

@@ -16,6 +16,7 @@ async def list_companies(
     is_supplier: bool | None = None,
     is_manufacturer: bool | None = None,
     active: bool | None = None,
+    ordering: str | None = None,
     filters: dict[str, Any] | None = None,
     limit: int = 25,
     offset: int = 0,
@@ -37,9 +38,14 @@ async def list_companies(
         is_manufacturer: restrict to companies flagged as a manufacturer.
         active: True for only active companies, False for only inactive
             ones, omit to include both.
-        filters: additional filter/ordering parameters beyond the named
-            arguments above - call describe_filters("company") to see
-            what's available.
+        ordering: field to sort results by ('-' prefix for descending, omit
+            it for ascending). Call describe_filters("company") and check
+            its ordering_fields list for valid values - an unrecognized
+            field is silently ignored (no error, no sort) rather than
+            rejected.
+        filters: additional filter parameters beyond the named arguments
+            above - call describe_filters("company") to see what's
+            available.
         limit: maximum number of results to return (capped at 100).
         offset: pagination offset.
     """
@@ -56,6 +62,8 @@ async def list_companies(
         base["is_manufacturer"] = is_manufacturer
     if active is not None:
         base["active"] = active
+    if ordering is not None:
+        base["ordering"] = ordering
 
     params = build_query_params(base, filters, limit, offset)
 
@@ -88,6 +96,7 @@ async def get_company(company_id: int) -> dict:
 @mcp.tool()
 async def list_contacts(
     company: int | None = None,
+    ordering: str | None = None,
     filters: dict[str, Any] | None = None,
     limit: int = 25,
     offset: int = 0,
@@ -100,9 +109,14 @@ async def list_contacts(
 
     Args:
         company: restrict to contacts at this Company ID.
-        filters: additional filter/ordering parameters beyond the named
-            arguments above - call describe_filters("contact") to see
-            what's available.
+        ordering: field to sort results by ('-' prefix for descending, omit
+            it for ascending). Call describe_filters("contact") and check
+            its ordering_fields list for valid values - an unrecognized
+            field is silently ignored (no error, no sort) rather than
+            rejected.
+        filters: additional filter parameters beyond the named arguments
+            above - call describe_filters("contact") to see what's
+            available.
         limit: maximum number of results to return (capped at 100).
         offset: pagination offset.
     """
@@ -111,6 +125,8 @@ async def list_contacts(
     base: dict[str, Any] = {}
     if company is not None:
         base["company"] = company
+    if ordering is not None:
+        base["ordering"] = ordering
 
     params = build_query_params(base, filters, limit, offset)
 
@@ -144,6 +160,7 @@ async def get_contact(contact_id: int) -> dict:
 @mcp.tool()
 async def list_addresses(
     company: int | None = None,
+    ordering: str | None = None,
     filters: dict[str, Any] | None = None,
     limit: int = 25,
     offset: int = 0,
@@ -156,9 +173,14 @@ async def list_addresses(
 
     Args:
         company: restrict to addresses belonging to this Company ID.
-        filters: additional filter/ordering parameters beyond the named
-            arguments above - call describe_filters("address") to see
-            what's available.
+        ordering: field to sort results by ('-' prefix for descending, omit
+            it for ascending). Call describe_filters("address") and check
+            its ordering_fields list for valid values - an unrecognized
+            field is silently ignored (no error, no sort) rather than
+            rejected.
+        filters: additional filter parameters beyond the named arguments
+            above - call describe_filters("address") to see what's
+            available.
         limit: maximum number of results to return (capped at 100).
         offset: pagination offset.
     """
@@ -167,6 +189,8 @@ async def list_addresses(
     base: dict[str, Any] = {}
     if company is not None:
         base["company"] = company
+    if ordering is not None:
+        base["ordering"] = ordering
 
     params = build_query_params(base, filters, limit, offset)
 

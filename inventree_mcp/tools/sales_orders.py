@@ -14,6 +14,7 @@ async def list_sales_orders(
     customer: int | None = None,
     status: int | None = None,
     outstanding: bool | None = None,
+    ordering: str | None = None,
     filters: dict[str, Any] | None = None,
     limit: int = 25,
     offset: int = 0,
@@ -34,9 +35,16 @@ async def list_sales_orders(
             for the common cases instead.
         outstanding: True for orders that are still open (not yet
             shipped/cancelled), False for the inverse. Omit to include both.
-        filters: additional filter/ordering parameters beyond the named
-            arguments above - call describe_filters("sales_order") to see
-            what's available, e.g. filters={"overdue": true, "ordering": "-target_date"}.
+        ordering: field to sort results by, e.g. "-target_date" for the
+            orders due soonest first ('-' prefix for descending, omit it for
+            ascending). Combine with limit to get a "top N by X" result, e.g.
+            ordering="target_date", limit=5 for the 5 most overdue open
+            orders. Call describe_filters("sales_order") and check its
+            ordering_fields list for valid values - an unrecognized field is
+            silently ignored (no error, no sort) rather than rejected.
+        filters: additional filter parameters beyond the named arguments
+            above - call describe_filters("sales_order") to see what's
+            available, e.g. filters={"overdue": true}.
         limit: maximum number of results to return (capped at 100).
         offset: pagination offset.
     """
@@ -49,6 +57,8 @@ async def list_sales_orders(
         base["status"] = status
     if outstanding is not None:
         base["outstanding"] = outstanding
+    if ordering is not None:
+        base["ordering"] = ordering
 
     params = build_query_params(base, filters, limit, offset)
 
@@ -86,6 +96,7 @@ async def list_sales_order_lines(
     part: int | None = None,
     allocated: bool | None = None,
     completed: bool | None = None,
+    ordering: str | None = None,
     filters: dict[str, Any] | None = None,
     limit: int = 25,
     offset: int = 0,
@@ -105,9 +116,14 @@ async def list_sales_order_lines(
             needing more stock allocated. Omit to include both.
         completed: True for lines that have been fully shipped, False for
             lines still awaiting shipment. Omit to include both.
-        filters: additional filter/ordering parameters beyond the named
-            arguments above - call describe_filters("sales_order_line") to
-            see what's available.
+        ordering: field to sort results by ('-' prefix for descending, omit
+            it for ascending). Call describe_filters("sales_order_line") and
+            check its ordering_fields list for valid values - an
+            unrecognized field is silently ignored (no error, no sort)
+            rather than rejected.
+        filters: additional filter parameters beyond the named arguments
+            above - call describe_filters("sales_order_line") to see what's
+            available.
         limit: maximum number of results to return (capped at 100).
         offset: pagination offset.
     """
@@ -122,6 +138,8 @@ async def list_sales_order_lines(
         base["allocated"] = allocated
     if completed is not None:
         base["completed"] = completed
+    if ordering is not None:
+        base["ordering"] = ordering
 
     params = build_query_params(base, filters, limit, offset)
 
@@ -161,6 +179,7 @@ async def list_sales_order_allocations(
     line: int | None = None,
     item: int | None = None,
     part: int | None = None,
+    ordering: str | None = None,
     filters: dict[str, Any] | None = None,
     limit: int = 25,
     offset: int = 0,
@@ -183,9 +202,14 @@ async def list_sales_order_allocations(
         line: restrict to allocations against this SalesOrderLineItem ID.
         item: restrict to allocations of this StockItem ID.
         part: restrict to allocations of stock for this Part ID.
-        filters: additional filter/ordering parameters beyond the named
-            arguments above - call describe_filters("sales_order_allocation")
-            to see what's available, e.g. filters={"assigned_to_shipment": false}
+        ordering: field to sort results by ('-' prefix for descending, omit
+            it for ascending). Call describe_filters("sales_order_allocation")
+            and check its ordering_fields list for valid values - an
+            unrecognized field is silently ignored (no error, no sort)
+            rather than rejected.
+        filters: additional filter parameters beyond the named arguments
+            above - call describe_filters("sales_order_allocation") to see
+            what's available, e.g. filters={"assigned_to_shipment": false}
             for allocations not yet assigned to a shipment.
         limit: maximum number of results to return (capped at 100).
         offset: pagination offset.
@@ -201,6 +225,8 @@ async def list_sales_order_allocations(
         base["item"] = item
     if part is not None:
         base["part"] = part
+    if ordering is not None:
+        base["ordering"] = ordering
 
     params = build_query_params(base, filters, limit, offset)
 
