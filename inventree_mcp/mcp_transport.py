@@ -55,6 +55,21 @@ if TYPE_CHECKING:
 
 _REQUEST_TIMEOUT_SECONDS = 60.0
 
+# Hop-by-hop headers (RFC 7230 6.1) that must never be forwarded from the
+# ASGI response onto the Django HttpResponse - WSGI servers (e.g. the stdlib
+# wsgiref-based `runserver`) reject them outright, since only the server
+# itself (not the application) is allowed to control connection handling.
+_HOP_BY_HOP_HEADERS = frozenset({
+    "connection",
+    "keep-alive",
+    "proxy-authenticate",
+    "proxy-authorization",
+    "te",
+    "trailer",
+    "transfer-encoding",
+    "upgrade",
+})
+
 
 def _new_session_manager() -> StreamableHTTPSessionManager:
     """StreamableHTTPSessionManager.run() can only be called once per instance."""
@@ -119,6 +134,8 @@ async def _handle_mcp_request(request: HttpRequest) -> HttpResponse:
     )
     for key, value in response_started.get("headers", []):
         name = key.decode("latin-1") if isinstance(key, bytes) else key
+        if name.lower() in _HOP_BY_HOP_HEADERS:
+            continue
         val = value.decode("latin-1") if isinstance(value, bytes) else value
         response[name] = val
 

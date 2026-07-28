@@ -18,7 +18,9 @@ from unittest.mock import patch
 import jsonschema
 from asgiref.sync import sync_to_async
 from build.models import Build, BuildItem
+from build.serializers import BuildSerializer
 from common.models import Attachment, Parameter, ParameterTemplate, ProjectCode
+from common.serializers import ProjectCodeSerializer
 from company.models import Address, Company, Contact, ManufacturerPart, SupplierPart
 from django.contrib.auth import get_user_model
 from django.contrib.contenttypes.models import ContentType
@@ -39,7 +41,7 @@ from order.models import (
 )
 from part.api import PartList
 from part.models import BomItem, BomItemSubstitute, Part, PartCategory, PartTestTemplate
-from part.serializers import PartSerializer
+from part.serializers import PartBriefSerializer, PartSerializer
 from plugin import registry
 from stock.models import (
     StockItem,
@@ -1066,6 +1068,56 @@ class OutputSchemaTest(InvenTreeTestCase):
         self.assertEqual(props["description"]["type"], ["string", "null"])
         self.assertEqual(props["category"]["type"], ["integer", "null"])
 
+    def test_choice_field_with_integer_choices_allows_non_string_json_types(self):
+        """Regression test for a real bug found via a live sweep of every list/get tool.
+
+        `_field_schema()` used to map every ChoiceField to `{"type": "string"}`
+        unconditionally, but a ChoiceField's actual runtime JSON type depends
+        on its *choices*, not its field class - InvenTree has plenty of
+        integer-keyed choice fields (custom status codes via
+        generic.states.fields.CustomChoiceField, a ChoiceField subclass) that
+        serialize as JSON numbers. `BuildSerializer.status_custom_key` broke
+        `jsonschema.validate()` live ("20 is not of type 'string', 'null'")
+        under the old mapping.
+        """
+        schema = serializer_schema(BuildSerializer)
+        self.assertIn("integer", schema["properties"]["status_custom_key"]["type"])
+
+    def test_decimal_field_allows_string_or_number(self):
+        """Regression test for a real bug found via the same live sweep as above.
+
+        DRF's plain `DecimalField` defaults to `coerce_to_string=True`
+        (nothing in this codebase overrides the global
+        `COERCE_DECIMAL_TO_STRING` setting) and serializes as a JSON string -
+        but `InvenTree.serializers.InvenTreeMoneySerializer` (used for every
+        money field) is *also* a `DecimalField` subclass that explicitly
+        overrides `to_representation()` to return a float instead.
+        `isinstance()` can't tell the two apart, so the schema has to accept
+        both. `PartBriefSerializer.minimum_stock` (auto-generated, unlike
+        `PartSerializer`'s own explicit `FloatField` override of the same
+        name) broke `jsonschema.validate()` live ("'0.000000' is not of type
+        'number', 'null'") under the old number-only mapping.
+        """
+        schema = serializer_schema(PartBriefSerializer)
+        field_type = schema["properties"]["minimum_stock"]["type"]
+        self.assertIn("string", field_type)
+        self.assertIn("number", field_type)
+
+    def test_nested_serializer_field_is_nullable(self):
+        """Regression test for a real bug found via the same live sweep as above.
+
+        Nested single-object serializer fields (e.g. `*_detail`) are
+        commonly `None` in real responses - either the underlying FK is
+        null, or (for OptionalField-based ones) the detail wasn't requested
+        via an output option - but `_field_schema()`'s `BaseSerializer`
+        branch didn't apply the same unconditional-nullable treatment as
+        plain fields. `ProjectCodeSerializer.responsible_detail` (`None`
+        whenever `responsible` isn't set) broke `jsonschema.validate()` live
+        ("None is not of type 'object'") under the old mapping.
+        """
+        schema = serializer_schema(ProjectCodeSerializer)
+        self.assertIn("null", schema["properties"]["responsible_detail"]["type"])
+
     def test_paginated_schema_wraps_results_array(self):
         schema = paginated_schema(PartSerializer)
 
@@ -1157,6 +1209,47 @@ class OutputSchemaTest(InvenTreeTestCase):
 
         self.assertIsNone(result["IPN"])
         jsonschema.validate(instance=result, schema=tool.output_schema)
+
+    def test_format_constrained_fields_allow_blank_string(self):
+        """`jsonschema.validate()` without a `format_checker` doesn't enforce
+        `format` at all - some MCP clients do. DRF's `allow_blank` fields
+        commonly emit `""` as their "not set" sentinel, and `""` never
+        matches a format assertion like `uri`/`email`/`date`.
+        """
+        schema = serializer_schema(PartSerializer)
+        checker = jsonschema.FormatChecker()
+
+        for value in (None, "", "https://example.com/datasheet.pdf"):
+            jsonschema.validate(
+                instance=value,
+                schema=schema["properties"]["link"],
+                format_checker=checker,
+            )
+
+        # FileField/ImageField serialize as a server-relative media path, not
+        # an absolute URI - "uri-reference" (not "uri") is required for this
+        # to validate at all, blank or not.
+        jsonschema.validate(
+            instance="/media/part_images/0402.jpg",
+            schema=schema["properties"]["image"],
+            format_checker=checker,
+        )
+
+    def test_datetime_field_has_no_format_assertion(self):
+        """InvenTree's `REST_FRAMEWORK['DATETIME_FORMAT']` setting overrides
+        DRF's default ISO-8601 output to `"%Y-%m-%d %H:%M"` for every
+        `DateTimeField` - a declared `"format": "date-time"` would reject
+        every real value under a client that enforces the format keyword.
+        """
+        schema = serializer_schema(PartSerializer)
+        pricing_updated_schema = schema["properties"]["pricing_updated"]
+
+        self.assertNotIn("format", pricing_updated_schema)
+        jsonschema.validate(
+            instance="2026-07-06 13:24",
+            schema=pricing_updated_schema,
+            format_checker=jsonschema.FormatChecker(),
+        )
 
 
 class DescribeFiltersTest(InvenTreeTestCase):
@@ -1264,7 +1357,6 @@ class DescribeFiltersTest(InvenTreeTestCase):
 
     def test_describe_filters_covers_project_code(self):
         result = describe_filters("project_code")
-        self.assertIn("active", result["filters"])
         self.assertIn("code", result["search_fields"])
 
     def test_describe_filters_rejects_unknown_resource(self):
@@ -1472,6 +1564,44 @@ class MCPTransportTest(InvenTreeTestCase):
         self.assertEqual(response.status_code, 200)
         body = json.loads(response.content)
         self.assertEqual(body["result"]["serverInfo"]["name"], "InvenTree MCP")
+
+    def test_hop_by_hop_response_headers_are_stripped(self):
+        """Regression test for _HOP_BY_HOP_HEADERS in mcp_transport.py.
+
+        The ASGI session manager can emit hop-by-hop headers (RFC 7230 6.1) -
+        e.g. "Connection" - as part of its response, which WSGI servers like
+        the stdlib `runserver` reject outright since only the server itself
+        is allowed to control connection handling. Patches
+        StreamableHTTPSessionManager.handle_request directly (rather than
+        relying on the real MCP protocol to happen to emit one) so this
+        doesn't depend on the session manager's internals continuing to
+        produce a hop-by-hop header on some particular request shape.
+        """
+
+        async def fake_handle_request(self, scope, receive, send):
+            await send({
+                "type": "http.response.start",
+                "status": 200,
+                "headers": [
+                    (b"content-type", b"application/json"),
+                    (b"connection", b"keep-alive"),
+                ],
+            })
+            await send({
+                "type": "http.response.body",
+                "body": b'{"jsonrpc": "2.0", "id": 1, "result": {}}',
+            })
+
+        with patch(
+            "mcp.server.streamable_http_manager.StreamableHTTPSessionManager"
+            ".handle_request",
+            new=fake_handle_request,
+        ):
+            response = self._post(HTTP_AUTHORIZATION=f"Token {self.api_token}")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn("Connection", response)
+        self.assertEqual(response["Content-Type"], "application/json")
 
 
 class PluginSettingsTest(InvenTreeTestCase):

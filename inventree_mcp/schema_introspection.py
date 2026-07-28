@@ -35,14 +35,29 @@ _ORDERED_FIELD_SCHEMAS: list[tuple[type, dict[str, Any]]] = [
     (drf.SlugField, {"type": "string"}),
     (drf.RegexField, {"type": "string"}),
     (drf.FilePathField, {"type": "string"}),
-    (drf.MultipleChoiceField, {"type": "array", "items": {"type": "string"}}),
-    (drf.ChoiceField, {"type": "string"}),
-    (drf.FileField, {"type": "string", "format": "uri"}),  # also covers ImageField
+    (
+        drf.MultipleChoiceField,
+        {
+            "type": "array",
+            "items": {"type": ["string", "integer", "number", "boolean"]},
+        },
+    ),
+    (drf.ChoiceField, {"type": ["string", "integer", "number", "boolean"]}),
+    # "uri-reference" (not "uri"): FileField/ImageField commonly serialize as
+    # a server-relative media path (e.g. "/media/part_images/0402.jpg"), which
+    # isn't a valid absolute "uri".
+    (
+        drf.FileField,
+        {"type": "string", "format": "uri-reference"},
+    ),  # also covers ImageField
     (drf.BooleanField, {"type": "boolean"}),
-    (drf.DateTimeField, {"type": "string", "format": "date-time"}),
+    # No "format": "date-time" here - InvenTree's REST_FRAMEWORK DATETIME_FORMAT
+    # setting overrides DRF's default ISO-8601 output to "%Y-%m-%d %H:%M" for
+    # every DateTimeField, which doesn't satisfy JSON Schema's date-time format.
+    (drf.DateTimeField, {"type": "string"}),
     (drf.DateField, {"type": "string", "format": "date"}),
     (drf.TimeField, {"type": "string", "format": "time"}),
-    (drf.DecimalField, {"type": "number"}),  # also covers djmoney MoneyField
+    (drf.DecimalField, {"type": ["string", "number"]}),
     (drf.FloatField, {"type": "number"}),
     (drf.IntegerField, {"type": "integer"}),
     (drf.PrimaryKeyRelatedField, {"type": "integer"}),
@@ -73,8 +88,12 @@ def _field_schema(field: drf.Field, depth: int = 0) -> dict[str, Any]:
         }
 
     if isinstance(field, drf.BaseSerializer):
+        # Nested serializer fields (e.g. `customer_detail`, `responsible_detail`)
+        # are commonly None - the related FK itself is null, or the detail
+        # wasn't requested via an output option - so this needs the same
+        # unconditional-nullable treatment as concrete field types below.
         return {
-            "type": "object",
+            "type": ["object", "null"],
             "properties": _build_properties(field.fields, depth + 1),
         }
 
@@ -85,15 +104,27 @@ def _field_schema(field: drf.Field, depth: int = 0) -> dict[str, Any]:
             break
 
     # DRF's `allow_null` governs *input* validation, not what to_representation()
-    # can actually emit - a CharField with allow_null=False will still output
-    # None if its underlying model column is null=True (confirmed the hard way:
-    # PartSerializer.IPN has allow_null=False but Part.IPN is a nullable
-    # CharField, and real data with a null IPN broke every list_parts call once
-    # more than one page of real parts was fetched through the real MCP
-    # transport - see AGENTS.md's output schema section). Trusting allow_null
-    # here isn't safe, so every concrete type is nullable unconditionally.
+    # can actually emit - a field can be allow_null=False while its underlying
+    # model column is nullable. Trusting allow_null isn't safe, so every
+    # concrete type is nullable unconditionally.
     if isinstance(result.get("type"), str):
         result["type"] = [result["type"], "null"]
+    elif isinstance(result.get("type"), list) and "null" not in result["type"]:
+        result["type"] = [*result["type"], "null"]
+
+    if "format" in result:
+        # A format-constrained string type can still legitimately come back
+        # blank ("") rather than null - DRF's allow_blank fields commonly use
+        # "" as their "not set" sentinel instead of (or alongside) None, and
+        # "" never matches a format like "uri"/"email"/"date". Express that as
+        # an explicit alternative rather than dropping the format annotation.
+        result = {
+            "anyOf": [
+                {"type": "null"},
+                {"const": ""},
+                {"type": "string", "format": result["format"]},
+            ]
+        }
 
     return result
 
