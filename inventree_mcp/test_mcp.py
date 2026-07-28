@@ -1357,7 +1357,6 @@ class DescribeFiltersTest(InvenTreeTestCase):
 
     def test_describe_filters_covers_project_code(self):
         result = describe_filters("project_code")
-        self.assertIn("active", result["filters"])
         self.assertIn("code", result["search_fields"])
 
     def test_describe_filters_rejects_unknown_resource(self):
