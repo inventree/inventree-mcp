@@ -140,6 +140,36 @@ def _parameter_template_list() -> type:
     return ParameterTemplateList
 
 
+def _return_order_list() -> type:
+    from order.api import ReturnOrderList
+
+    return ReturnOrderList
+
+
+def _return_order_line_list() -> type:
+    from order.api import ReturnOrderLineItemList
+
+    return ReturnOrderLineItemList
+
+
+def _stock_tracking_list() -> type:
+    from stock.api import StockTrackingList
+
+    return StockTrackingList
+
+
+def _stock_test_result_list() -> type:
+    from stock.api import StockItemTestResultList
+
+    return StockItemTestResultList
+
+
+def _project_code_list() -> type:
+    from common.api import ProjectCodeList
+
+    return ProjectCodeList
+
+
 # Values are loader functions, not the view classes directly, so each import
 # stays lazy (matches tools/*.py's own per-call imports) - importing e.g.
 # part.api at module level risks AppRegistryNotReady if InvenTree's plugin
@@ -167,6 +197,11 @@ _RESOURCE_LOADERS = {
     "attachment": _attachment_list,
     "parameter": _parameter_list,
     "parameter_template": _parameter_template_list,
+    "return_order": _return_order_list,
+    "return_order_line": _return_order_line_list,
+    "stock_tracking": _stock_tracking_list,
+    "stock_test_result": _stock_test_result_list,
+    "project_code": _project_code_list,
 }
 
 
@@ -185,15 +220,20 @@ def describe_filters(resource: str) -> dict:
             "build_line", "build_item", "company", "contact", "address",
             "manufacturer_part", "supplier_part", "bom_item",
             "bom_substitute", "attachment", "parameter",
-            "parameter_template" - matches list_parts / list_stock_items /
-            list_locations / list_categories / list_purchase_orders /
+            "parameter_template", "return_order", "return_order_line",
+            "stock_tracking", "stock_test_result", "project_code" -
+            matches list_parts / list_stock_items / list_locations /
+            list_categories / list_purchase_orders /
             list_purchase_order_lines / list_sales_orders /
             list_sales_order_lines / list_sales_order_allocations /
             list_build_orders / list_build_lines / list_build_items /
             list_companies / list_contacts / list_addresses /
             list_manufacturer_parts / list_supplier_parts /
             list_bom_items / list_bom_substitutes / list_attachments /
-            list_parameters / list_parameter_templates.
+            list_parameters / list_parameter_templates /
+            list_return_orders / list_return_order_lines /
+            list_stock_tracking / list_stock_test_results /
+            list_project_codes.
 
     Returns a dict with:
         search_fields: fields matched by that list tool's `search` argument.
