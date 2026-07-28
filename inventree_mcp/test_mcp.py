@@ -51,7 +51,7 @@ from stock.models import (
 )
 from users.models import ApiToken
 
-from . import context
+from . import context, tool_visibility
 from .filter_introspection import _default_ordering_fields
 from .mcp_server import mcp
 from .proxy import call_view
@@ -1045,6 +1045,139 @@ class MCPToolPermissionTest(InvenTreeTestCase):
         detail = await get_project_code(self.project_code.pk)
         self.assertEqual(detail["pk"], self.project_code.pk)
 
+    async def test_tools_list_reflects_oauth2_scope_narrowing(self):
+        """Regression test for a real design bug caught during development, not a
+        hypothetical: a literal HTTP OPTIONS-based capability check (the obvious
+        first idea for this feature) would have shown list_parts as available to
+        *any* OAuth2 token, because InvenTree's map_scope()
+        (InvenTree/permissions.py) hardcodes OPTIONS to a generic "g:read" scope
+        for every resource, while the real GET call requires the resource-specific
+        scope - here, "r:view:part" (and, per a pre-existing scope-combination
+        quirk, "r:view:build" too - see cls.oauth2_token_with_part_scope's own
+        comment). tool_visibility.py checks "GET" instead specifically to avoid
+        this - see proxy.user_has_access()'s docstring for the full comparison.
+        """
+        context.set_current_user(
+            self.user, oauth2_token=self.oauth2_token_without_part_scope
+        )
+        self.addCleanup(context.set_current_user, None)
+
+        names = await tool_visibility.visible_tool_names(
+            tool.name for tool in await mcp.list_tools()
+        )
+        self.assertNotIn("list_parts", names)
+
+    async def test_tools_list_shows_tool_when_oauth2_scope_matches(self):
+        """Positive counterpart to the test above - a token that *does* carry
+        the required scope must still see the tool, not just fail closed.
+        """
+        context.set_current_user(
+            self.user, oauth2_token=self.oauth2_token_with_part_scope
+        )
+        self.addCleanup(context.set_current_user, None)
+
+        names = await tool_visibility.visible_tool_names(
+            tool.name for tool in await mcp.list_tools()
+        )
+        self.assertIn("list_parts", names)
+
+
+class ToolVisibilityTest(InvenTreeTestCase):
+    """Verify tools/list only advertises tools the current caller can actually use.
+
+    This is discovery-time filtering, not a new permission boundary -
+    proxy.call_view() remains the one real enforcement point (see
+    tool_visibility.py's module docstring), and MCPToolPermissionTest above
+    already covers that a tool hidden here still cleanly rejects a direct
+    call by name.
+    """
+
+    roles: ClassVar[list[str]] = ["part.view"]
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+
+        cls.no_access_user = get_user_model().objects.create_user(
+            username="tool_visibility_no_access",
+            password="password",
+            email="tool-visibility-no-access@example.org",
+        )
+
+    def _as(self, user):
+        context.set_current_user(user)
+        self.addCleanup(context.set_current_user, None)
+
+    async def test_ungated_tools_are_always_visible_to_a_zero_role_user(self):
+        """Exact-set assertion (not just "contains") - these are specifically the
+        tools whose underlying views have no RolePermission/RuleSet gate at all
+        (attachments, parameters, parameter templates, project codes - see each
+        tool module's own docstring) plus describe_filters, which has no
+        underlying view. Anything else appearing here would be a real
+        over-exposure bug.
+        """
+        self._as(self.no_access_user)
+
+        names = await tool_visibility.visible_tool_names(
+            tool.name for tool in await mcp.list_tools()
+        )
+
+        self.assertEqual(
+            names,
+            {
+                "describe_filters",
+                "list_attachments",
+                "get_attachment",
+                "list_parameters",
+                "get_parameter",
+                "list_parameter_templates",
+                "get_parameter_template",
+                "list_project_codes",
+                "get_project_code",
+            },
+        )
+
+    async def test_role_holder_sees_the_matching_gated_tools(self):
+        self._as(self.user)
+
+        names = await tool_visibility.visible_tool_names(
+            tool.name for tool in await mcp.list_tools()
+        )
+
+        self.assertIn("list_parts", names)
+        self.assertIn("get_part", names)
+        # A role this user does NOT hold must stay hidden.
+        self.assertNotIn("list_purchase_orders", names)
+        self.assertNotIn("list_stock_items", names)
+
+    async def test_no_bound_user_returns_every_tool_unfiltered(self):
+        """Static introspection outside a real MCP request (e.g. every other test
+        in this file that calls mcp.list_tools() directly without binding a
+        user) must not be treated as "zero access" - there's no caller to filter
+        *by*, so nothing is filtered.
+        """
+        all_names = {tool.name for tool in await mcp.list_tools()}
+
+        names = await tool_visibility.visible_tool_names(all_names)
+
+        self.assertEqual(names, all_names)
+
+    async def test_every_gated_tool_has_a_visibility_entry(self):
+        """Guard against a future tool shipping without a _TOOL_RESOURCES entry.
+
+        An omission wouldn't break anything today - visible_tool_names()
+        treats an unmapped name as always-visible (see its docstring for why
+        that's the safe default, not fail-closed) - but it would silently
+        defeat filtering for that one tool, and only a targeted check like
+        this one would catch it before a user did.
+        """
+        all_names = {tool.name for tool in await mcp.list_tools()}
+        unmapped = (
+            all_names - set(tool_visibility._TOOL_RESOURCES) - {"describe_filters"}
+        )
+
+        self.assertEqual(unmapped, set())
+
 
 class OutputSchemaTest(InvenTreeTestCase):
     """Verify tool output schemas are derived from the real serializers, not left blank.
@@ -1519,6 +1652,25 @@ class MCPTransportTest(InvenTreeTestCase):
             **headers,
         )
 
+    @staticmethod
+    def _list_tools_body() -> str:
+        return json.dumps({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/list",
+            "params": {},
+        })
+
+    def _list_tools(self, client: Client | None = None, **headers) -> Any:
+        client = client or Client(enforce_csrf_checks=True)
+        return client.post(
+            self.URL,
+            data=self._list_tools_body(),
+            content_type="application/json",
+            HTTP_ACCEPT="application/json, text/event-stream",
+            **headers,
+        )
+
     def test_unauthenticated_request_rejected_by_default(self):
         """REQUIRE_AUTH defaults to True - no credential must be cleanly rejected, not crash."""
         response = self._post()
@@ -1602,6 +1754,32 @@ class MCPTransportTest(InvenTreeTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertNotIn("Connection", response)
         self.assertEqual(response["Content-Type"], "application/json")
+
+    def test_tools_list_over_http_is_filtered_by_permission(self):
+        """End-to-end regression test for tool_visibility.apply()'s wiring into
+        the real low-level server.
+
+        ToolVisibilityTest (elsewhere in this file) already covers
+        visible_tool_names() directly, but that alone doesn't prove the
+        override actually reaches a real client's tools/list request over the
+        wire, rather than only affecting some FastMCP-level helper a real
+        request never touches - exactly the "tested via mcp.call_tool() isn't
+        tested for real" distinction this codebase has been bitten by before
+        (see AGENTS.md's Output schemas section).
+
+        cls.user has zero roles here (MCPTransportTest.roles is never set -
+        see UserMixin's default), so only the ungated tools should appear.
+        """
+        response = self._list_tools(HTTP_AUTHORIZATION=f"Token {self.api_token}")
+
+        self.assertEqual(response.status_code, 200)
+        body = json.loads(response.content)
+        names = {tool["name"] for tool in body["result"]["tools"]}
+
+        self.assertIn("describe_filters", names)
+        self.assertIn("list_project_codes", names)
+        self.assertNotIn("list_parts", names)
+        self.assertNotIn("list_purchase_orders", names)
 
 
 class PluginSettingsTest(InvenTreeTestCase):

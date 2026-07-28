@@ -174,7 +174,10 @@ def _project_code_list() -> type:
 # stays lazy (matches tools/*.py's own per-call imports) - importing e.g.
 # part.api at module level risks AppRegistryNotReady if InvenTree's plugin
 # registry scans this module before Django's app registry is ready.
-_RESOURCE_LOADERS = {
+# Not module-private (no leading underscore): tool_visibility.py also reads
+# this to resolve a resource's view class for a permission check, rather
+# than duplicating 27 loader functions.
+RESOURCE_LOADERS = {
     "part": _part_list,
     "stock": _stock_list,
     "location": _stock_location_list,
@@ -244,12 +247,12 @@ def describe_filters(resource: str) -> dict:
             directly in that list tool's `filters` argument, e.g.
             filters={"is_variant": true}.
     """
-    loader = _RESOURCE_LOADERS.get(resource)
+    loader = RESOURCE_LOADERS.get(resource)
 
     if loader is None:
         raise ToolError(
             f"Unknown resource {resource!r}. Choose one of: "
-            f"{', '.join(_RESOURCE_LOADERS)}"
+            f"{', '.join(RESOURCE_LOADERS)}"
         )
 
     return describe_filterset(loader())
