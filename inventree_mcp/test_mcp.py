@@ -1150,6 +1150,31 @@ class ToolVisibilityTest(InvenTreeTestCase):
         self.assertNotIn("list_purchase_orders", names)
         self.assertNotIn("list_stock_items", names)
 
+    async def test_purchase_order_role_holder_sees_purchase_order_tools(self):
+        """Spot-check a different role than the class-level part.view - filtering
+        must reflect exactly which roles a user holds, not just "has some role".
+        Grants the role directly onto cls.user's existing group rather than via
+        a second user/group, since RuleSet permission checks are re-evaluated
+        fresh on every visible_tool_names() call (no stale-cache risk - see
+        InvenTree.cache.get_session_cache()'s per-request-thread scoping, not
+        persistent across calls).
+        """
+        await sync_to_async(self.assignRole)(
+            role="purchase_order.view", group=self.group
+        )
+        self._as(self.user)
+
+        names = await tool_visibility.visible_tool_names(
+            tool.name for tool in await mcp.list_tools()
+        )
+
+        self.assertIn("list_purchase_orders", names)
+        self.assertIn("get_purchase_order", names)
+        self.assertIn("list_purchase_order_lines", names)
+        self.assertIn("get_purchase_order_line", names)
+        # Still no access to a role this user was never granted.
+        self.assertNotIn("list_stock_items", names)
+
     async def test_no_bound_user_returns_every_tool_unfiltered(self):
         """Static introspection outside a real MCP request (e.g. every other test
         in this file that calls mcp.list_tools() directly without binding a
