@@ -1565,6 +1565,44 @@ class MCPTransportTest(InvenTreeTestCase):
         body = json.loads(response.content)
         self.assertEqual(body["result"]["serverInfo"]["name"], "InvenTree MCP")
 
+    def test_hop_by_hop_response_headers_are_stripped(self):
+        """Regression test for _HOP_BY_HOP_HEADERS in mcp_transport.py.
+
+        The ASGI session manager can emit hop-by-hop headers (RFC 7230 6.1) -
+        e.g. "Connection" - as part of its response, which WSGI servers like
+        the stdlib `runserver` reject outright since only the server itself
+        is allowed to control connection handling. Patches
+        StreamableHTTPSessionManager.handle_request directly (rather than
+        relying on the real MCP protocol to happen to emit one) so this
+        doesn't depend on the session manager's internals continuing to
+        produce a hop-by-hop header on some particular request shape.
+        """
+
+        async def fake_handle_request(self, scope, receive, send):
+            await send({
+                "type": "http.response.start",
+                "status": 200,
+                "headers": [
+                    (b"content-type", b"application/json"),
+                    (b"connection", b"keep-alive"),
+                ],
+            })
+            await send({
+                "type": "http.response.body",
+                "body": b'{"jsonrpc": "2.0", "id": 1, "result": {}}',
+            })
+
+        with patch(
+            "mcp.server.streamable_http_manager.StreamableHTTPSessionManager"
+            ".handle_request",
+            new=fake_handle_request,
+        ):
+            response = self._post(HTTP_AUTHORIZATION=f"Token {self.api_token}")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn("Connection", response)
+        self.assertEqual(response["Content-Type"], "application/json")
+
 
 class PluginSettingsTest(InvenTreeTestCase):
     """Verify get_plugin_setting() fails safe - both REQUIRE_AUTH and MCP_READ_ONLY
