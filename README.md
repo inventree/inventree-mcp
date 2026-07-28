@@ -39,6 +39,12 @@ parameters - call the `describe_filters` tool (e.g. `describe_filters("part")`) 
 available for a given resource: every field InvenTree's own filter/search/ordering options support,
 read live from the same definitions the REST API uses.
 
+The set of tools an MCP client sees (via `tools/list`) is filtered to what the calling user (and,
+for OAuth2 requests, their token's scope) can actually use - a tool only appears if its underlying
+API endpoint's real permission check succeeds for that caller. This is a discovery-time convenience
+only, not a substitute for the permission enforcement described above: every tool call is still
+checked for real, in full, regardless of what was advertised.
+
 ## Installation
 
 ### InvenTree Plugin Manager

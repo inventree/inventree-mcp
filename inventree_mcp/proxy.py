@@ -14,6 +14,7 @@ from typing import Any
 
 from asgiref.sync import sync_to_async
 from mcp.server.fastmcp.exceptions import ToolError
+from rest_framework import exceptions
 from rest_framework.test import APIRequestFactory, force_authenticate
 from rest_framework.views import APIView
 
@@ -78,6 +79,89 @@ def _call_view_sync(
         )
 
     return body
+
+
+def _user_has_access_sync(view_cls: type[APIView], method: str) -> bool:
+    try:
+        user = get_current_user()
+    except PermissionError:
+        # No bound user (e.g. called outside a real MCP request) - nothing
+        # to check permissions *for*. Mirrors tool_visibility.py's own
+        # has_current_user() guard, but doesn't rely on every caller
+        # remembering to check that first.
+        return False
+
+    oauth2_token = get_current_oauth2_token()
+    method = method.upper()
+    request = _factory.generic(method, "/")
+
+    if oauth2_token is not None:
+        # Same reasoning as _call_view_sync's OAuth2 branch: a synthetic
+        # force_authenticate() identity isn't recognized as OAuth2 by the
+        # scope-check permission class, so the real (user, token) pair has
+        # to be re-presented as a genuine OAuth2Authentication instance.
+        view = scoped_view_class(view_cls)()
+        view.authentication_classes = authentication_classes_for(user, oauth2_token)
+    else:
+        force_authenticate(request, user=user)
+        view = view_cls()
+
+    view.args = ()
+    view.kwargs = {}
+    drf_request = view.initialize_request(request)
+    view.request = drf_request
+
+    try:
+        # initial() (not a hand-picked subset of it) deliberately: some
+        # InvenTree permission classes' has_permission() end up calling
+        # view.get_queryset() to resolve the model for a permission-codename
+        # lookup (DRF's DjangoModelPermissions._queryset()), which needs
+        # format_kwarg/content-negotiation state that only initial() sets up
+        # - skipping straight to check_permissions() raised a bare
+        # AttributeError ('BomList' object has no attribute 'format_kwarg')
+        # instead of a clean permission result. check_throttles() runs too,
+        # which is correct, not just harmless: a real GET call would be
+        # subject to the same throttling.
+        view.initial(drf_request)
+    except exceptions.APIException:
+        return False
+
+    return True
+
+
+async def user_has_access(view_cls: type[APIView], method: str = "GET") -> bool:
+    """Check whether the current MCP user could actually call this view, without calling it.
+
+    Used by tool_visibility.py to decide whether a tool should appear in
+    tools/list at all - runs only the real permission check
+    (RolePermission/OAuth2 scope, exactly what call_view() itself enforces),
+    never the view's business logic, so it doesn't touch the database for
+    real data and doesn't need a valid object id for detail views.
+
+    Deliberately checks the "GET" permission even for tools that end up
+    wrapping a different underlying view (list vs detail) - see
+    tool_visibility.py's module docstring for why a literal HTTP OPTIONS
+    request is the wrong tool for this: InvenTree's OAuth2 scope resolver
+    (map_scope() in InvenTree/permissions.py) hardcodes OPTIONS to a generic
+    "g:read" scope regardless of resource, while GET requires the real
+    resource-specific scope (e.g. "r:view:part") - an OPTIONS-based check
+    would show a tool as available to a narrowly-scoped OAuth2 token that
+    the real GET call would then reject. RolePermission (used by
+    token/basic auth) doesn't have this problem (it maps OPTIONS to "view",
+    same as GET) - but checking via "GET" is correct for both cases, not
+    just the one that would otherwise silently break.
+
+    Args:
+        view_cls: the view class to check (e.g. part.api.PartList).
+        method: the HTTP method whose permission to check - "GET" for every
+            tool that exists today (all read-only).
+
+    Returns:
+        True if the current user (and OAuth2 token, if applicable) has
+        permission to make this request; False otherwise, including when no
+        user is bound at all.
+    """
+    return await sync_to_async(_user_has_access_sync)(view_cls, method)
 
 
 async def call_view(

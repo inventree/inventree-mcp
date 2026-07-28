@@ -45,6 +45,18 @@ def reset_current_user(token: Token) -> None:
     _current_identity.reset(token)
 
 
+def has_current_user() -> bool:
+    """Return whether a user is currently bound, without raising if not.
+
+    For code that needs to behave differently outside a real MCP request
+    (e.g. tool_visibility.py, which can't run a permission check without a
+    caller to check permissions *for*) rather than treat "no caller" as a
+    fatal error the way get_current_user() deliberately does everywhere else.
+    """
+    identity = _current_identity.get()
+    return identity is not None and identity.user.is_authenticated
+
+
 def get_current_user() -> AbstractUser:
     """Return the user bound to the current MCP request.
 
