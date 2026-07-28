@@ -17,12 +17,12 @@ than they could via the normal API. Tool code must never query the Django ORM di
 tools by wrapping an existing (or new) API view, not by reimplementing queries.
 
 Currently read-only: parts, stock items, stock locations, part categories, purchase orders, sales
-orders, build orders (each with list + detail, plus line items, and - for sales/build orders -
-stock allocations), companies, contacts, addresses, manufacturer parts, supplier parts, BOM items
-and substitutes, attachments, and parameters (with parameter templates). No write tools are
-implemented yet - and when they are, the `MCP_READ_ONLY` setting (see Configuration below) blocks
-any write action by default regardless of the calling user's permissions, as a second layer on top
-of per-user roles.
+orders, return orders, build orders (each with list + detail, plus line items, and - for sales/
+build orders - stock allocations), companies, contacts, addresses, manufacturer parts, supplier
+parts, BOM items and substitutes, attachments, parameters (with parameter templates), stock
+tracking history, stock item test results, and project codes. No write tools are implemented yet -
+and when they are, the `MCP_READ_ONLY` setting (see Configuration below) blocks any write action by
+default regardless of the calling user's permissions, as a second layer on top of per-user roles.
 
 Attachments and parameters are generic - they can be linked to almost any InvenTree record (a
 part, a stock item, an order, ...) rather than being tied to one resource type - see

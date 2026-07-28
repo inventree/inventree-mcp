@@ -37,6 +37,7 @@ from common.serializers import (
     AttachmentSerializer,
     ParameterSerializer,
     ParameterTemplateSerializer,
+    ProjectCodeSerializer,
 )
 from company.serializers import (
     AddressSerializer,
@@ -48,6 +49,8 @@ from company.serializers import (
 from order.serializers import (
     PurchaseOrderLineItemSerializer,
     PurchaseOrderSerializer,
+    ReturnOrderLineItemSerializer,
+    ReturnOrderSerializer,
     SalesOrderAllocationSerializer,
     SalesOrderLineItemSerializer,
     SalesOrderSerializer,
@@ -59,7 +62,12 @@ from part.serializers import (
     PartSerializer,
 )
 from pydantic import RootModel
-from stock.serializers import LocationSerializer, StockItemSerializer
+from stock.serializers import (
+    LocationSerializer,
+    StockItemSerializer,
+    StockItemTestResultSerializer,
+    StockTrackingSerializer,
+)
 
 from .mcp_server import mcp
 from .schema_introspection import paginated_schema, serializer_schema
@@ -111,6 +119,16 @@ _OUTPUT_SCHEMAS = {
     "get_parameter": serializer_schema(ParameterSerializer),
     "list_parameter_templates": paginated_schema(ParameterTemplateSerializer),
     "get_parameter_template": serializer_schema(ParameterTemplateSerializer),
+    "list_return_orders": paginated_schema(ReturnOrderSerializer),
+    "get_return_order": serializer_schema(ReturnOrderSerializer),
+    "list_return_order_lines": paginated_schema(ReturnOrderLineItemSerializer),
+    "get_return_order_line": serializer_schema(ReturnOrderLineItemSerializer),
+    "list_stock_tracking": paginated_schema(StockTrackingSerializer),
+    "get_stock_tracking": serializer_schema(StockTrackingSerializer),
+    "list_stock_test_results": paginated_schema(StockItemTestResultSerializer),
+    "get_stock_test_result": serializer_schema(StockItemTestResultSerializer),
+    "list_project_codes": paginated_schema(ProjectCodeSerializer),
+    "get_project_code": serializer_schema(ProjectCodeSerializer),
 }
 
 

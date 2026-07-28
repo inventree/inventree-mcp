@@ -18,7 +18,7 @@ from unittest.mock import patch
 import jsonschema
 from asgiref.sync import sync_to_async
 from build.models import Build, BuildItem
-from common.models import Attachment, Parameter, ParameterTemplate
+from common.models import Attachment, Parameter, ParameterTemplate, ProjectCode
 from company.models import Address, Company, Contact, ManufacturerPart, SupplierPart
 from django.contrib.auth import get_user_model
 from django.contrib.contenttypes.models import ContentType
@@ -30,16 +30,23 @@ from oauth2_provider.models import AccessToken, Application
 from order.models import (
     PurchaseOrder,
     PurchaseOrderLineItem,
+    ReturnOrder,
+    ReturnOrderLineItem,
     SalesOrder,
     SalesOrderAllocation,
     SalesOrderLineItem,
     SalesOrderShipment,
 )
 from part.api import PartList
-from part.models import BomItem, BomItemSubstitute, Part, PartCategory
+from part.models import BomItem, BomItemSubstitute, Part, PartCategory, PartTestTemplate
 from part.serializers import PartSerializer
 from plugin import registry
-from stock.models import StockItem, StockLocation
+from stock.models import (
+    StockItem,
+    StockItemTestResult,
+    StockItemTracking,
+    StockLocation,
+)
 from users.models import ApiToken
 
 from . import context
@@ -82,11 +89,18 @@ from .tools.parameters import (
     list_parameters,
 )
 from .tools.parts import get_part, list_parts
+from .tools.project_codes import get_project_code, list_project_codes
 from .tools.purchase_orders import (
     get_purchase_order,
     get_purchase_order_line,
     list_purchase_order_lines,
     list_purchase_orders,
+)
+from .tools.return_orders import (
+    get_return_order,
+    get_return_order_line,
+    list_return_order_lines,
+    list_return_orders,
 )
 from .tools.sales_orders import (
     get_sales_order,
@@ -97,6 +111,12 @@ from .tools.sales_orders import (
     list_sales_orders,
 )
 from .tools.stock import get_stock_item, list_stock_items
+from .tools.stock_history import (
+    get_stock_test_result,
+    get_stock_tracking,
+    list_stock_test_results,
+    list_stock_tracking,
+)
 from .tools.supplier_parts import (
     get_manufacturer_part,
     get_supplier_part,
@@ -116,6 +136,7 @@ class MCPToolPermissionTest(InvenTreeTestCase):
         "stock_location.view",
         "purchase_order.view",
         "sales_order.view",
+        "return_order.view",
         "build.view",
     ]
 
@@ -133,6 +154,7 @@ class MCPToolPermissionTest(InvenTreeTestCase):
             category=cls.category,
             salable=True,
             purchaseable=True,
+            testable=True,
         )
         cls.location = StockLocation.objects.create(
             name="Test Location", description="A location for MCP tests"
@@ -267,6 +289,30 @@ class MCPToolPermissionTest(InvenTreeTestCase):
             data="100",
         )
 
+        # --- Return order fixtures ---
+        cls.return_order = ReturnOrder.objects.create(
+            customer=cls.customer, reference="RMA-MCP-0001"
+        )
+        cls.ro_line = ReturnOrderLineItem.objects.create(
+            order=cls.return_order, item=cls.stock_item
+        )
+
+        # --- Stock tracking / test result fixtures ---
+        cls.stock_tracking = StockItemTracking.objects.create(
+            item=cls.stock_item, notes="Test tracking entry"
+        )
+        cls.test_template = PartTestTemplate.objects.create(
+            part=cls.part, test_name="Continuity Test"
+        )
+        cls.stock_test_result = StockItemTestResult.objects.create(
+            stock_item=cls.stock_item, template=cls.test_template, result=True
+        )
+
+        # --- Project code fixtures ---
+        cls.project_code = ProjectCode.objects.create(
+            code="MCP-PROJ", description="Test project code"
+        )
+
         # A second user, deliberately given no roles at all.
         cls.no_access_user = get_user_model().objects.create_user(
             username="noaccess", password="password", email="noaccess@example.org"
@@ -398,7 +444,7 @@ class MCPToolPermissionTest(InvenTreeTestCase):
         """The deep sort-order tests above only exercise list_stock_items - every other
         list tool's own `if ordering is not None: base["ordering"] = ordering` line
         still needs at least one real call with ordering set, or it's dead code as
-        far as the test suite can tell. Spot-checks all 19 list tools at once.
+        far as the test suite can tell. Spot-checks all 24 list tools at once.
 
         Uses each resource's own real ordering_fields (via describe_filters) rather
         than a hardcoded field name per tool, so this can't silently drift out of
@@ -429,6 +475,11 @@ class MCPToolPermissionTest(InvenTreeTestCase):
             "attachment": list_attachments,
             "parameter": list_parameters,
             "parameter_template": list_parameter_templates,
+            "return_order": list_return_orders,
+            "return_order_line": list_return_order_lines,
+            "stock_tracking": list_stock_tracking,
+            "stock_test_result": list_stock_test_results,
+            "project_code": list_project_codes,
         }
 
         for resource, tool_fn in list_tools_by_resource.items():
@@ -897,6 +948,101 @@ class MCPToolPermissionTest(InvenTreeTestCase):
         with self.assertRaises(ToolError):
             await get_supplier_part(self.supplier_part.pk)
 
+    async def test_authorized_user_can_list_and_get_return_orders(self):
+        self._as(self.user)
+
+        listed = await list_return_orders(customer=self.customer.pk)
+        refs = [o["reference"] for o in listed["results"]]
+        self.assertIn("RMA-MCP-0001", refs)
+
+        detail = await get_return_order(self.return_order.pk)
+        self.assertEqual(detail["reference"], "RMA-MCP-0001")
+
+    async def test_authorized_user_can_list_and_get_return_order_lines(self):
+        self._as(self.user)
+
+        listed = await list_return_order_lines(order=self.return_order.pk)
+        ids = [line["pk"] for line in listed["results"]]
+        self.assertIn(self.ro_line.pk, ids)
+
+        detail = await get_return_order_line(self.ro_line.pk)
+        self.assertEqual(detail["order"], self.return_order.pk)
+
+    async def test_unauthorized_user_cannot_access_return_order_data(self):
+        self._as(self.no_access_user)
+
+        with self.assertRaises(ToolError):
+            await list_return_orders()
+        with self.assertRaises(ToolError):
+            await get_return_order(self.return_order.pk)
+        with self.assertRaises(ToolError):
+            await list_return_order_lines()
+        with self.assertRaises(ToolError):
+            await get_return_order_line(self.ro_line.pk)
+
+    async def test_authorized_user_can_list_and_get_stock_tracking(self):
+        self._as(self.user)
+
+        listed = await list_stock_tracking(item=self.stock_item.pk)
+        ids = [entry["pk"] for entry in listed["results"]]
+        self.assertIn(self.stock_tracking.pk, ids)
+
+        detail = await get_stock_tracking(self.stock_tracking.pk)
+        self.assertEqual(detail["item"], self.stock_item.pk)
+
+    async def test_authorized_user_can_list_and_get_stock_test_results(self):
+        self._as(self.user)
+
+        listed = await list_stock_test_results(stock_item=self.stock_item.pk)
+        ids = [r["pk"] for r in listed["results"]]
+        self.assertIn(self.stock_test_result.pk, ids)
+
+        detail = await get_stock_test_result(self.stock_test_result.pk)
+        self.assertEqual(detail["template"], self.test_template.pk)
+
+    async def test_unauthorized_user_cannot_access_stock_history_data(self):
+        """StockItemTracking/StockItemTestResult are both mapped to the 'stock'
+        ruleset (users/ruleset.py) - a zero-role user must be denied here the
+        same as list_stock_items.
+        """
+        self._as(self.no_access_user)
+
+        with self.assertRaises(ToolError):
+            await list_stock_tracking()
+        with self.assertRaises(ToolError):
+            await get_stock_tracking(self.stock_tracking.pk)
+        with self.assertRaises(ToolError):
+            await list_stock_test_results()
+        with self.assertRaises(ToolError):
+            await get_stock_test_result(self.stock_test_result.pk)
+
+    async def test_authorized_user_can_list_and_get_project_codes(self):
+        self._as(self.user)
+
+        listed = await list_project_codes(search="MCP-PROJ")
+        codes = [c["code"] for c in listed["results"]]
+        self.assertIn("MCP-PROJ", codes)
+
+        detail = await get_project_code(self.project_code.pk)
+        self.assertEqual(detail["code"], "MCP-PROJ")
+
+    async def test_unauthorized_user_can_still_read_project_codes(self):
+        """Deliberately the opposite assertion from most other resources' denial tests.
+
+        ProjectCodeList/Detail use IsStaffOrReadOnlyScope (see
+        tools/project_codes.py's module docstring) - any authenticated user
+        can read, not just staff or a specific-role holder. Asserting
+        ToolError here (the pattern used everywhere else) would mask a real
+        regression if this view's permissions ever tightened.
+        """
+        self._as(self.no_access_user)
+
+        listed = await list_project_codes(search="MCP-PROJ")
+        self.assertIn("MCP-PROJ", [c["code"] for c in listed["results"]])
+
+        detail = await get_project_code(self.project_code.pk)
+        self.assertEqual(detail["pk"], self.project_code.pk)
+
 
 class OutputSchemaTest(InvenTreeTestCase):
     """Verify tool output schemas are derived from the real serializers, not left blank.
@@ -943,6 +1089,9 @@ class OutputSchemaTest(InvenTreeTestCase):
         self.assertIsNotNone(tools["get_build_item"].outputSchema)
         self.assertIsNotNone(tools["list_companies"].outputSchema)
         self.assertIsNotNone(tools["get_supplier_part"].outputSchema)
+        self.assertIsNotNone(tools["list_return_orders"].outputSchema)
+        self.assertIsNotNone(tools["get_stock_tracking"].outputSchema)
+        self.assertIsNotNone(tools["list_project_codes"].outputSchema)
 
     async def test_every_registered_tool_has_an_output_schema(self):
         """Guard against a new tool being added without a matching entry in output_schemas.py."""
@@ -1095,6 +1244,28 @@ class DescribeFiltersTest(InvenTreeTestCase):
             describe_filters("address")["filters"],
             {"company": {"type": "integer (id)"}},
         )
+
+    def test_describe_filters_covers_return_order_resources(self):
+        for resource in ("return_order", "return_order_line"):
+            result = describe_filters(resource)
+            self.assertTrue(result["filters"])
+
+        self.assertIn("outstanding", describe_filters("return_order")["filters"])
+        self.assertIn("received", describe_filters("return_order_line")["filters"])
+
+    def test_describe_filters_covers_stock_history_resources(self):
+        tracking_filters = describe_filters("stock_tracking")["filters"]
+        self.assertIn("item", tracking_filters)
+        self.assertIn("user", tracking_filters)
+
+        result_filters = describe_filters("stock_test_result")["filters"]
+        self.assertIn("template", result_filters)
+        self.assertIn("result", result_filters)
+
+    def test_describe_filters_covers_project_code(self):
+        result = describe_filters("project_code")
+        self.assertIn("active", result["filters"])
+        self.assertIn("code", result["search_fields"])
 
     def test_describe_filters_rejects_unknown_resource(self):
         with self.assertRaises(ToolError):

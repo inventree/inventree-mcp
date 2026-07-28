@@ -38,9 +38,12 @@ from .tools import (  # noqa: F401
     locations,
     parameters,
     parts,
+    project_codes,
     purchase_orders,
+    return_orders,
     sales_orders,
     stock,
+    stock_history,
     supplier_parts,
 )
 
