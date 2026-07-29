@@ -42,6 +42,12 @@ class InvenTreeMCP(SettingsMixin, UrlsMixin, InvenTreePlugin):
             "validator": bool,
             "default": True,
         },
+        "MCP_LOG_TOOL_CALLS": {
+            "name": "Log Tool Calls",
+            "description": "Log every MCP tool call (tool name, arguments, calling user, and outcome) to the 'inventree' logger for debugging.",
+            "validator": bool,
+            "default": False,
+        },
     }
 
     # Custom URL endpoints (from UrlsMixin)
