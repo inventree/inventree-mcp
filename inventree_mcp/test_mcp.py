@@ -1952,8 +1952,15 @@ class ToolLoggingTest(InvenTreeTestCase):
         body = json.loads(response.content)
         self.assertTrue(body["result"]["isError"])
 
-        self.assertEqual(mock_logger.info.call_count, 2)
-        end_args = mock_logger.info.call_args_list[1].args
+        # Only the start line goes through .info - the completion line for a
+        # failed call is logged at .warning instead (tool_logging.py's
+        # `except` branch), a deliberate severity distinction from the
+        # .info-only "succeeded" case above, so it can be filtered/alerted on
+        # separately in real logs.
+        self.assertEqual(mock_logger.info.call_count, 1)
+        self.assertEqual(mock_logger.warning.call_count, 1)
+
+        end_args = mock_logger.warning.call_args_list[0].args
         self.assertIn("failed", end_args[0])
         self.assertIn("get_project_code", end_args)
 
