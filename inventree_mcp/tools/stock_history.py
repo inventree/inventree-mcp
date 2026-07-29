@@ -78,7 +78,9 @@ async def list_stock_tracking(
 
 
 @mcp.tool()
-async def get_stock_tracking(tracking_id: int) -> dict:
+async def get_stock_tracking(
+    tracking_id: int, filters: dict[str, Any] | None = None
+) -> dict:
     """Get full detail for a single stock tracking entry by its ID.
 
     Returns the same object shape as one entry in list_stock_tracking's
@@ -87,6 +89,9 @@ async def get_stock_tracking(tracking_id: int) -> dict:
 
     Args:
         tracking_id: the StockItemTracking entry's database ID.
+        filters: optional-field toggles beyond what's returned by default -
+            call describe_filters("stock_tracking") and check its
+            optional_fields.
 
     Raises:
         ToolError: no tracking entry exists with that ID, or the caller
@@ -95,7 +100,11 @@ async def get_stock_tracking(tracking_id: int) -> dict:
     from stock.api import StockTrackingDetail
 
     return await call_view(
-        StockTrackingDetail, "GET", f"/api/stock/track/{tracking_id}/", pk=tracking_id
+        StockTrackingDetail,
+        "GET",
+        f"/api/stock/track/{tracking_id}/",
+        pk=tracking_id,
+        query_params=filters,
     )
 
 
@@ -160,7 +169,9 @@ async def list_stock_test_results(
 
 
 @mcp.tool()
-async def get_stock_test_result(result_id: int) -> dict:
+async def get_stock_test_result(
+    result_id: int, filters: dict[str, Any] | None = None
+) -> dict:
     """Get full detail for a single stock item test result by its ID.
 
     Returns the same object shape as one entry in list_stock_test_results's
@@ -169,6 +180,9 @@ async def get_stock_test_result(result_id: int) -> dict:
 
     Args:
         result_id: the StockItemTestResult's database ID.
+        filters: optional-field toggles beyond what's returned by default -
+            call describe_filters("stock_test_result") and check its
+            optional_fields.
 
     Raises:
         ToolError: no test result exists with that ID, or the caller
@@ -177,5 +191,9 @@ async def get_stock_test_result(result_id: int) -> dict:
     from stock.api import StockItemTestResultDetail
 
     return await call_view(
-        StockItemTestResultDetail, "GET", f"/api/stock/test/{result_id}/", pk=result_id
+        StockItemTestResultDetail,
+        "GET",
+        f"/api/stock/test/{result_id}/",
+        pk=result_id,
+        query_params=filters,
     )

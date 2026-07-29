@@ -88,7 +88,9 @@ async def list_attachments(
 
 
 @mcp.tool()
-async def get_attachment(attachment_id: int) -> dict:
+async def get_attachment(
+    attachment_id: int, filters: dict[str, Any] | None = None
+) -> dict:
     """Get full detail for a single attachment by its ID.
 
     Returns the same object shape as one entry in list_attachments's
@@ -97,6 +99,8 @@ async def get_attachment(attachment_id: int) -> dict:
 
     Args:
         attachment_id: the Attachment's database ID.
+        filters: optional-field toggles beyond what's returned by default -
+            call describe_filters("attachment") and check its optional_fields.
 
     Raises:
         ToolError: no attachment exists with that ID, or the caller doesn't
@@ -105,5 +109,9 @@ async def get_attachment(attachment_id: int) -> dict:
     from common.api import AttachmentDetail
 
     return await call_view(
-        AttachmentDetail, "GET", f"/api/attachment/{attachment_id}/", pk=attachment_id
+        AttachmentDetail,
+        "GET",
+        f"/api/attachment/{attachment_id}/",
+        pk=attachment_id,
+        query_params=filters,
     )

@@ -92,7 +92,9 @@ async def list_parameters(
 
 
 @mcp.tool()
-async def get_parameter(parameter_id: int) -> dict:
+async def get_parameter(
+    parameter_id: int, filters: dict[str, Any] | None = None
+) -> dict:
     """Get full detail for a single parameter by its ID.
 
     Returns the same object shape as one entry in list_parameters's
@@ -101,6 +103,8 @@ async def get_parameter(parameter_id: int) -> dict:
 
     Args:
         parameter_id: the Parameter's database ID.
+        filters: optional-field toggles beyond what's returned by default -
+            call describe_filters("parameter") and check its optional_fields.
 
     Raises:
         ToolError: no parameter exists with that ID, or the caller doesn't
@@ -109,7 +113,11 @@ async def get_parameter(parameter_id: int) -> dict:
     from common.api import ParameterDetail
 
     return await call_view(
-        ParameterDetail, "GET", f"/api/parameter/{parameter_id}/", pk=parameter_id
+        ParameterDetail,
+        "GET",
+        f"/api/parameter/{parameter_id}/",
+        pk=parameter_id,
+        query_params=filters,
     )
 
 
@@ -163,7 +171,9 @@ async def list_parameter_templates(
 
 
 @mcp.tool()
-async def get_parameter_template(template_id: int) -> dict:
+async def get_parameter_template(
+    template_id: int, filters: dict[str, Any] | None = None
+) -> dict:
     """Get full detail for a single parameter template by its ID.
 
     Returns the same object shape as one entry in list_parameter_templates's
@@ -172,6 +182,9 @@ async def get_parameter_template(template_id: int) -> dict:
 
     Args:
         template_id: the ParameterTemplate's database ID.
+        filters: optional-field toggles beyond what's returned by default -
+            call describe_filters("parameter_template") and check its
+            optional_fields.
 
     Raises:
         ToolError: no parameter template exists with that ID, or the caller
@@ -184,4 +197,5 @@ async def get_parameter_template(template_id: int) -> dict:
         "GET",
         f"/api/parameter/template/{template_id}/",
         pk=template_id,
+        query_params=filters,
     )

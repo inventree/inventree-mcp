@@ -71,7 +71,7 @@ async def list_companies(
 
 
 @mcp.tool()
-async def get_company(company_id: int) -> dict:
+async def get_company(company_id: int, filters: dict[str, Any] | None = None) -> dict:
     """Get full detail for a single company by its ID.
 
     Returns the same object shape as one entry in list_companies's
@@ -81,6 +81,8 @@ async def get_company(company_id: int) -> dict:
 
     Args:
         company_id: the Company's database ID.
+        filters: optional-field toggles beyond what's returned by default -
+            call describe_filters("company") and check its optional_fields.
 
     Raises:
         ToolError: no company exists with that ID, or the caller doesn't
@@ -89,7 +91,11 @@ async def get_company(company_id: int) -> dict:
     from company.api import CompanyDetail
 
     return await call_view(
-        CompanyDetail, "GET", f"/api/company/{company_id}/", pk=company_id
+        CompanyDetail,
+        "GET",
+        f"/api/company/{company_id}/",
+        pk=company_id,
+        query_params=filters,
     )
 
 
@@ -136,7 +142,7 @@ async def list_contacts(
 
 
 @mcp.tool()
-async def get_contact(contact_id: int) -> dict:
+async def get_contact(contact_id: int, filters: dict[str, Any] | None = None) -> dict:
     """Get full detail for a single contact by its ID.
 
     Returns the same object shape as one entry in list_contacts's `results`
@@ -145,6 +151,8 @@ async def get_contact(contact_id: int) -> dict:
 
     Args:
         contact_id: the Contact's database ID.
+        filters: optional-field toggles beyond what's returned by default -
+            call describe_filters("contact") and check its optional_fields.
 
     Raises:
         ToolError: no contact exists with that ID, or the caller doesn't
@@ -153,7 +161,11 @@ async def get_contact(contact_id: int) -> dict:
     from company.api import ContactDetail
 
     return await call_view(
-        ContactDetail, "GET", f"/api/company/contact/{contact_id}/", pk=contact_id
+        ContactDetail,
+        "GET",
+        f"/api/company/contact/{contact_id}/",
+        pk=contact_id,
+        query_params=filters,
     )
 
 
@@ -200,7 +212,7 @@ async def list_addresses(
 
 
 @mcp.tool()
-async def get_address(address_id: int) -> dict:
+async def get_address(address_id: int, filters: dict[str, Any] | None = None) -> dict:
     """Get full detail for a single company address by its ID.
 
     Returns the same object shape as one entry in list_addresses's
@@ -209,6 +221,8 @@ async def get_address(address_id: int) -> dict:
 
     Args:
         address_id: the Address's database ID.
+        filters: optional-field toggles beyond what's returned by default -
+            call describe_filters("address") and check its optional_fields.
 
     Raises:
         ToolError: no address exists with that ID, or the caller doesn't
@@ -217,5 +231,9 @@ async def get_address(address_id: int) -> dict:
     from company.api import AddressDetail
 
     return await call_view(
-        AddressDetail, "GET", f"/api/company/address/{address_id}/", pk=address_id
+        AddressDetail,
+        "GET",
+        f"/api/company/address/{address_id}/",
+        pk=address_id,
+        query_params=filters,
     )

@@ -73,7 +73,9 @@ async def list_return_orders(
 
 
 @mcp.tool()
-async def get_return_order(order_id: int) -> dict:
+async def get_return_order(
+    order_id: int, filters: dict[str, Any] | None = None
+) -> dict:
     """Get full detail for a single return order by its ID.
 
     Returns the same object shape as one entry in list_return_orders's
@@ -83,6 +85,9 @@ async def get_return_order(order_id: int) -> dict:
 
     Args:
         order_id: the ReturnOrder's database ID.
+        filters: optional-field toggles beyond what's returned by default -
+            call describe_filters("return_order") and check its
+            optional_fields.
 
     Raises:
         ToolError: no return order exists with that ID, or the caller
@@ -91,7 +96,11 @@ async def get_return_order(order_id: int) -> dict:
     from order.api import ReturnOrderDetail
 
     return await call_view(
-        ReturnOrderDetail, "GET", f"/api/order/ro/{order_id}/", pk=order_id
+        ReturnOrderDetail,
+        "GET",
+        f"/api/order/ro/{order_id}/",
+        pk=order_id,
+        query_params=filters,
     )
 
 
@@ -150,7 +159,9 @@ async def list_return_order_lines(
 
 
 @mcp.tool()
-async def get_return_order_line(line_id: int) -> dict:
+async def get_return_order_line(
+    line_id: int, filters: dict[str, Any] | None = None
+) -> dict:
     """Get full detail for a single return order line item by its ID.
 
     Returns the same object shape as one entry in list_return_order_lines's
@@ -159,6 +170,9 @@ async def get_return_order_line(line_id: int) -> dict:
 
     Args:
         line_id: the ReturnOrderLineItem's database ID.
+        filters: optional-field toggles beyond what's returned by default -
+            call describe_filters("return_order_line") and check its
+            optional_fields.
 
     Raises:
         ToolError: no line item exists with that ID, or the caller doesn't
@@ -171,4 +185,5 @@ async def get_return_order_line(line_id: int) -> dict:
         "GET",
         f"/api/order/ro-line/{line_id}/",
         pk=line_id,
+        query_params=filters,
     )

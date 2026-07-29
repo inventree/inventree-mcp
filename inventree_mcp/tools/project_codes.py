@@ -62,7 +62,9 @@ async def list_project_codes(
 
 
 @mcp.tool()
-async def get_project_code(project_code_id: int) -> dict:
+async def get_project_code(
+    project_code_id: int, filters: dict[str, Any] | None = None
+) -> dict:
     """Get full detail for a single project code by its ID.
 
     Returns the same object shape as one entry in list_project_codes's
@@ -71,6 +73,9 @@ async def get_project_code(project_code_id: int) -> dict:
 
     Args:
         project_code_id: the ProjectCode's database ID.
+        filters: optional-field toggles beyond what's returned by default -
+            call describe_filters("project_code") and check its
+            optional_fields.
 
     Raises:
         ToolError: no project code exists with that ID, or the caller
@@ -83,4 +88,5 @@ async def get_project_code(project_code_id: int) -> dict:
         "GET",
         f"/api/project-code/{project_code_id}/",
         pk=project_code_id,
+        query_params=filters,
     )

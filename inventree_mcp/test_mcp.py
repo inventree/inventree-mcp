@@ -416,6 +416,34 @@ class MCPToolPermissionTest(InvenTreeTestCase):
         detail = await get_stock_item(self.stock_item.pk)
         self.assertEqual(detail["part"], self.part.pk)
 
+    async def test_optional_fields_can_be_toggled_via_filters(self):
+        """`filters` doubles as the optional-field toggle described by
+        describe_filters()'s `optional_fields` - regression test that the
+        real API actually honors it end-to-end, on both a get_* tool (added
+        specifically to carry this) and a list_* tool (which already passed
+        `filters` straight through as query params).
+        """
+        self._as(self.user)
+
+        # part_detail default_include=True on StockItemSerializer - present
+        # unless explicitly turned off.
+        default_detail = await get_stock_item(self.stock_item.pk)
+        self.assertIn("part_detail", default_detail)
+
+        without_detail = await get_stock_item(
+            self.stock_item.pk, filters={"part_detail": False}
+        )
+        self.assertNotIn("part_detail", without_detail)
+
+        # location_detail default_include=False - absent unless requested.
+        listed_default = await list_stock_items(part=self.part.pk)
+        self.assertNotIn("location_detail", listed_default["results"][0])
+
+        listed_with_location = await list_stock_items(
+            part=self.part.pk, filters={"location_detail": True}
+        )
+        self.assertIn("location_detail", listed_with_location["results"][0])
+
     async def test_ordering_argument_sorts_results(self):
         """The named `ordering` argument must actually sort the real queryset, not just be accepted.
 
@@ -1517,6 +1545,37 @@ class DescribeFiltersTest(InvenTreeTestCase):
         result = describe_filters("project_code")
         self.assertIn("code", result["search_fields"])
 
+    def test_describe_filters_reports_optional_fields(self):
+        """optional_fields must reflect the real `output_options` declared on
+        the view, read live from InvenTree.fields.InvenTreeOutputOption -
+        same "can't drift" guarantee as filters/search/ordering above.
+        """
+        optional_fields = describe_filters("stock")["optional_fields"]
+
+        self.assertTrue(optional_fields["part_detail"]["default_included"])
+        self.assertFalse(optional_fields["location_detail"]["default_included"])
+        self.assertIn("supplier_part_detail", optional_fields)
+        self.assertIn("tests", optional_fields)
+        # Every option carries a human-readable description an agent can
+        # show/reason about, not just the bare flag name.
+        self.assertTrue(optional_fields["part_detail"]["description"])
+
+    def test_describe_filters_optional_fields_empty_for_flat_resources(self):
+        """Resources with no expandable relations (no `output_options`
+        declared on the view) must report an empty dict, not raise.
+        """
+        for resource in (
+            "company",
+            "contact",
+            "address",
+            "bom_substitute",
+            "attachment",
+            "parameter",
+            "parameter_template",
+            "project_code",
+        ):
+            self.assertEqual(describe_filters(resource)["optional_fields"], {})
+
     def test_describe_filters_rejects_unknown_resource(self):
         with self.assertRaises(ToolError):
             describe_filters("not-a-real-resource")
@@ -1656,16 +1715,18 @@ class MCPTransportTest(InvenTreeTestCase):
 
     @staticmethod
     def _initialize_body() -> str:
-        return json.dumps({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "initialize",
-            "params": {
-                "protocolVersion": "2025-06-18",
-                "capabilities": {},
-                "clientInfo": {"name": "test", "version": "0.1"},
-            },
-        })
+        return json.dumps(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2025-06-18",
+                    "capabilities": {},
+                    "clientInfo": {"name": "test", "version": "0.1"},
+                },
+            }
+        )
 
     def _post(self, client: Client | None = None, **headers) -> Any:
         client = client or Client(enforce_csrf_checks=True)
@@ -1679,12 +1740,14 @@ class MCPTransportTest(InvenTreeTestCase):
 
     @staticmethod
     def _list_tools_body() -> str:
-        return json.dumps({
-            "jsonrpc": "2.0",
-            "id": 2,
-            "method": "tools/list",
-            "params": {},
-        })
+        return json.dumps(
+            {
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/list",
+                "params": {},
+            }
+        )
 
     def _list_tools(self, client: Client | None = None, **headers) -> Any:
         client = client or Client(enforce_csrf_checks=True)
@@ -1756,18 +1819,22 @@ class MCPTransportTest(InvenTreeTestCase):
         """
 
         async def fake_handle_request(self, scope, receive, send):
-            await send({
-                "type": "http.response.start",
-                "status": 200,
-                "headers": [
-                    (b"content-type", b"application/json"),
-                    (b"connection", b"keep-alive"),
-                ],
-            })
-            await send({
-                "type": "http.response.body",
-                "body": b'{"jsonrpc": "2.0", "id": 1, "result": {}}',
-            })
+            await send(
+                {
+                    "type": "http.response.start",
+                    "status": 200,
+                    "headers": [
+                        (b"content-type", b"application/json"),
+                        (b"connection", b"keep-alive"),
+                    ],
+                }
+            )
+            await send(
+                {
+                    "type": "http.response.body",
+                    "body": b'{"jsonrpc": "2.0", "id": 1, "result": {}}',
+                }
+            )
 
         with patch(
             "mcp.server.streamable_http_manager.StreamableHTTPSessionManager"

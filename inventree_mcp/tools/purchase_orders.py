@@ -68,7 +68,9 @@ async def list_purchase_orders(
 
 
 @mcp.tool()
-async def get_purchase_order(order_id: int) -> dict:
+async def get_purchase_order(
+    order_id: int, filters: dict[str, Any] | None = None
+) -> dict:
     """Get full detail for a single purchase order by its ID.
 
     Returns the same object shape as one entry in list_purchase_orders's
@@ -78,6 +80,9 @@ async def get_purchase_order(order_id: int) -> dict:
 
     Args:
         order_id: the PurchaseOrder's database ID.
+        filters: optional-field toggles beyond what's returned by default -
+            call describe_filters("purchase_order") and check its
+            optional_fields.
 
     Raises:
         ToolError: no purchase order exists with that ID, or the caller
@@ -86,7 +91,11 @@ async def get_purchase_order(order_id: int) -> dict:
     from order.api import PurchaseOrderDetail
 
     return await call_view(
-        PurchaseOrderDetail, "GET", f"/api/order/po/{order_id}/", pk=order_id
+        PurchaseOrderDetail,
+        "GET",
+        f"/api/order/po/{order_id}/",
+        pk=order_id,
+        query_params=filters,
     )
 
 
@@ -147,7 +156,9 @@ async def list_purchase_order_lines(
 
 
 @mcp.tool()
-async def get_purchase_order_line(line_id: int) -> dict:
+async def get_purchase_order_line(
+    line_id: int, filters: dict[str, Any] | None = None
+) -> dict:
     """Get full detail for a single purchase order line item by its ID.
 
     Returns the same object shape as one entry in
@@ -156,6 +167,9 @@ async def get_purchase_order_line(line_id: int) -> dict:
 
     Args:
         line_id: the PurchaseOrderLineItem's database ID.
+        filters: optional-field toggles beyond what's returned by default -
+            call describe_filters("purchase_order_line") and check its
+            optional_fields.
 
     Raises:
         ToolError: no line item exists with that ID, or the caller doesn't
@@ -168,4 +182,5 @@ async def get_purchase_order_line(line_id: int) -> dict:
         "GET",
         f"/api/order/po-line/{line_id}/",
         pk=line_id,
+        query_params=filters,
     )

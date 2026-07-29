@@ -61,7 +61,7 @@ async def list_locations(
 
 
 @mcp.tool()
-async def get_location(location_id: int) -> dict:
+async def get_location(location_id: int, filters: dict[str, Any] | None = None) -> dict:
     """Get full detail for a single stock location by its ID.
 
     Returns the same object shape as one entry in list_locations's
@@ -70,6 +70,8 @@ async def get_location(location_id: int) -> dict:
 
     Args:
         location_id: the StockLocation's database ID.
+        filters: optional-field toggles beyond what's returned by default -
+            call describe_filters("location") and check its optional_fields.
 
     Raises:
         ToolError: no location exists with that ID, or the caller doesn't
@@ -82,4 +84,5 @@ async def get_location(location_id: int) -> dict:
         "GET",
         f"/api/stock/location/{location_id}/",
         pk=location_id,
+        query_params=filters,
     )

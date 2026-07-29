@@ -39,6 +39,13 @@ parameters - call the `describe_filters` tool (e.g. `describe_filters("part")`) 
 available for a given resource: every field InvenTree's own filter/search/ordering options support,
 read live from the same definitions the REST API uses.
 
+Many resources also support inlining a related object's full detail into each result instead of
+just its ID (e.g. `part_detail=true` on the stock API embeds the full `Part` alongside a
+`StockItem`), avoiding a separate `get_*` call per related object. `describe_filters`'s
+`optional_fields` key lists these for a given resource, each read live from InvenTree's own
+`output_options` declaration - so it can't drift either. Pass any of them as a boolean in `filters`,
+on both a `list_*` tool and its `get_*` counterpart, e.g. `filters={"part_detail": true}`.
+
 The set of tools an MCP client sees (via `tools/list`) is filtered to what the calling user (and,
 for OAuth2 requests, their token's scope) can actually use - a tool only appears if its underlying
 API endpoint's real permission check succeeds for that caller. This is a discovery-time convenience
