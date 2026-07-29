@@ -1,9 +1,10 @@
-"""MCP tools for discovering what's filterable/searchable on the list tools."""
+"""MCP tools for discovering what's filterable/searchable/expandable on the list and get tools."""
 
 from __future__ import annotations
 
 from mcp.server.fastmcp.exceptions import ToolError
 
+from ..expand_introspection import describe_output_options
 from ..filter_introspection import describe_filterset
 from ..mcp_server import mcp
 
@@ -210,11 +211,15 @@ RESOURCE_LOADERS = {
 
 @mcp.tool()
 def describe_filters(resource: str) -> dict:
-    """Describe the search/filter/ordering options available for a resource.
+    """Describe the search/filter/ordering/expansion options available for a resource.
 
+    Call this before list_*/get_* calls where you need something beyond
+    their named arguments - filtering the result set, sorting it, or
+    inlining a related object's full detail to avoid a second round trip.
     Does not touch any InvenTree data - this is static metadata about the
-    corresponding list tool's capabilities, read directly from InvenTree's
-    own filter definitions (so it can't drift out of date).
+    corresponding list/get tools' capabilities, read directly from
+    InvenTree's own filter and output-option definitions (so it can't drift
+    out of date).
 
     Args:
         resource: one of "part", "stock", "location", "category",
@@ -236,7 +241,8 @@ def describe_filters(resource: str) -> dict:
             list_parameters / list_parameter_templates /
             list_return_orders / list_return_order_lines /
             list_stock_tracking / list_stock_test_results /
-            list_project_codes.
+            list_project_codes (and each list_* tool's get_* counterpart -
+            optional_fields below applies to both).
 
     Returns a dict with:
         search_fields: fields matched by that list tool's `search` argument.
@@ -246,6 +252,14 @@ def describe_filters(resource: str) -> dict:
         filters: {name: {type, label, choices}} - pass any of these keys
             directly in that list tool's `filters` argument, e.g.
             filters={"is_variant": true}.
+        optional_fields: {name: {default_included, description}} - fields
+            that are *not* returned by default (unless default_included is
+            true), but can be inlined into every result by passing the key
+            as a boolean in `filters` - on both the list tool and its get_*
+            counterpart, e.g. filters={"part_detail": true} adds a full
+            nested `part` object to each stock item instead of just its ID,
+            saving a separate get_part call per result. Empty for resources
+            with no expandable relations.
     """
     loader = RESOURCE_LOADERS.get(resource)
 
@@ -255,4 +269,9 @@ def describe_filters(resource: str) -> dict:
             f"{', '.join(RESOURCE_LOADERS)}"
         )
 
-    return describe_filterset(loader())
+    view_cls = loader()
+
+    return {
+        **describe_filterset(view_cls),
+        "optional_fields": describe_output_options(view_cls),
+    }

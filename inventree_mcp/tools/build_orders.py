@@ -66,7 +66,7 @@ async def list_build_orders(
 
 
 @mcp.tool()
-async def get_build_order(build_id: int) -> dict:
+async def get_build_order(build_id: int, filters: dict[str, Any] | None = None) -> dict:
     """Get full detail for a single build order by its ID.
 
     Returns the same object shape as one entry in list_build_orders's
@@ -78,6 +78,9 @@ async def get_build_order(build_id: int) -> dict:
 
     Args:
         build_id: the Build's database ID.
+        filters: optional-field toggles beyond what's returned by default -
+            call describe_filters("build_order") and check its
+            optional_fields.
 
     Raises:
         ToolError: no build order exists with that ID, or the caller
@@ -85,7 +88,9 @@ async def get_build_order(build_id: int) -> dict:
     """
     from build.api import BuildDetail
 
-    return await call_view(BuildDetail, "GET", f"/api/build/{build_id}/", pk=build_id)
+    return await call_view(
+        BuildDetail, "GET", f"/api/build/{build_id}/", pk=build_id, query_params=filters
+    )
 
 
 @mcp.tool()
@@ -140,7 +145,7 @@ async def list_build_lines(
 
 
 @mcp.tool()
-async def get_build_line(line_id: int) -> dict:
+async def get_build_line(line_id: int, filters: dict[str, Any] | None = None) -> dict:
     """Get full detail for a single build order line item by its ID.
 
     Returns the same object shape as one entry in list_build_lines's
@@ -149,6 +154,8 @@ async def get_build_line(line_id: int) -> dict:
 
     Args:
         line_id: the BuildLine's database ID.
+        filters: optional-field toggles beyond what's returned by default -
+            call describe_filters("build_line") and check its optional_fields.
 
     Raises:
         ToolError: no build line exists with that ID, or the caller
@@ -157,7 +164,11 @@ async def get_build_line(line_id: int) -> dict:
     from build.api import BuildLineDetail
 
     return await call_view(
-        BuildLineDetail, "GET", f"/api/build/line/{line_id}/", pk=line_id
+        BuildLineDetail,
+        "GET",
+        f"/api/build/line/{line_id}/",
+        pk=line_id,
+        query_params=filters,
     )
 
 
@@ -216,7 +227,7 @@ async def list_build_items(
 
 
 @mcp.tool()
-async def get_build_item(item_id: int) -> dict:
+async def get_build_item(item_id: int, filters: dict[str, Any] | None = None) -> dict:
     """Get full detail for a single build order allocation by its ID.
 
     Returns the same object shape as one entry in list_build_items's
@@ -225,6 +236,8 @@ async def get_build_item(item_id: int) -> dict:
 
     Args:
         item_id: the BuildItem's database ID.
+        filters: optional-field toggles beyond what's returned by default -
+            call describe_filters("build_item") and check its optional_fields.
 
     Raises:
         ToolError: no allocation exists with that ID, or the caller doesn't
@@ -233,5 +246,9 @@ async def get_build_item(item_id: int) -> dict:
     from build.api import BuildItemDetail
 
     return await call_view(
-        BuildItemDetail, "GET", f"/api/build/item/{item_id}/", pk=item_id
+        BuildItemDetail,
+        "GET",
+        f"/api/build/item/{item_id}/",
+        pk=item_id,
+        query_params=filters,
     )

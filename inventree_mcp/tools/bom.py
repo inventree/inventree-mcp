@@ -99,7 +99,7 @@ async def list_bom_items(
 
 
 @mcp.tool()
-async def get_bom_item(bom_item_id: int) -> dict:
+async def get_bom_item(bom_item_id: int, filters: dict[str, Any] | None = None) -> dict:
     """Get full detail for a single BOM item by its ID.
 
     Returns the same object shape as one entry in list_bom_items's
@@ -108,6 +108,8 @@ async def get_bom_item(bom_item_id: int) -> dict:
 
     Args:
         bom_item_id: the BomItem's database ID.
+        filters: optional-field toggles beyond what's returned by default -
+            call describe_filters("bom_item") and check its optional_fields.
 
     Raises:
         ToolError: no BOM item exists with that ID, or the caller doesn't
@@ -115,7 +117,13 @@ async def get_bom_item(bom_item_id: int) -> dict:
     """
     from part.api import BomDetail
 
-    return await call_view(BomDetail, "GET", f"/api/bom/{bom_item_id}/", pk=bom_item_id)
+    return await call_view(
+        BomDetail,
+        "GET",
+        f"/api/bom/{bom_item_id}/",
+        pk=bom_item_id,
+        query_params=filters,
+    )
 
 
 @mcp.tool()
@@ -171,7 +179,9 @@ async def list_bom_substitutes(
 
 
 @mcp.tool()
-async def get_bom_substitute(substitute_id: int) -> dict:
+async def get_bom_substitute(
+    substitute_id: int, filters: dict[str, Any] | None = None
+) -> dict:
     """Get full detail for a single BOM item substitute by its ID.
 
     Returns the same object shape as one entry in list_bom_substitutes's
@@ -180,6 +190,9 @@ async def get_bom_substitute(substitute_id: int) -> dict:
 
     Args:
         substitute_id: the BomItemSubstitute's database ID.
+        filters: optional-field toggles beyond what's returned by default -
+            call describe_filters("bom_substitute") and check its
+            optional_fields.
 
     Raises:
         ToolError: no substitute entry exists with that ID, or the caller
@@ -192,4 +205,5 @@ async def get_bom_substitute(substitute_id: int) -> dict:
         "GET",
         f"/api/bom/substitute/{substitute_id}/",
         pk=substitute_id,
+        query_params=filters,
     )

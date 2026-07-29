@@ -66,7 +66,7 @@ async def list_parts(
 
 
 @mcp.tool()
-async def get_part(part_id: int) -> dict:
+async def get_part(part_id: int, filters: dict[str, Any] | None = None) -> dict:
     """Get full detail for a single part by its ID.
 
     Returns the same object shape as one entry in list_parts's `results`
@@ -75,6 +75,9 @@ async def get_part(part_id: int) -> dict:
 
     Args:
         part_id: the Part's database ID.
+        filters: optional-field toggles beyond what's returned by default -
+            call describe_filters("part") and check its optional_fields, e.g.
+            filters={"category_detail": true}.
 
     Raises:
         ToolError: no part exists with that ID, or the caller doesn't have
@@ -82,4 +85,6 @@ async def get_part(part_id: int) -> dict:
     """
     from part.api import PartDetail
 
-    return await call_view(PartDetail, "GET", f"/api/part/{part_id}/", pk=part_id)
+    return await call_view(
+        PartDetail, "GET", f"/api/part/{part_id}/", pk=part_id, query_params=filters
+    )

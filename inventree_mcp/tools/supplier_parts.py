@@ -66,7 +66,9 @@ async def list_manufacturer_parts(
 
 
 @mcp.tool()
-async def get_manufacturer_part(manufacturer_part_id: int) -> dict:
+async def get_manufacturer_part(
+    manufacturer_part_id: int, filters: dict[str, Any] | None = None
+) -> dict:
     """Get full detail for a single manufacturer part by its ID.
 
     Returns the same object shape as one entry in
@@ -75,6 +77,9 @@ async def get_manufacturer_part(manufacturer_part_id: int) -> dict:
 
     Args:
         manufacturer_part_id: the ManufacturerPart's database ID.
+        filters: optional-field toggles beyond what's returned by default -
+            call describe_filters("manufacturer_part") and check its
+            optional_fields.
 
     Raises:
         ToolError: no manufacturer part exists with that ID, or the caller
@@ -87,6 +92,7 @@ async def get_manufacturer_part(manufacturer_part_id: int) -> dict:
         "GET",
         f"/api/company/part/manufacturer/{manufacturer_part_id}/",
         pk=manufacturer_part_id,
+        query_params=filters,
     )
 
 
@@ -148,7 +154,9 @@ async def list_supplier_parts(
 
 
 @mcp.tool()
-async def get_supplier_part(supplier_part_id: int) -> dict:
+async def get_supplier_part(
+    supplier_part_id: int, filters: dict[str, Any] | None = None
+) -> dict:
     """Get full detail for a single supplier part by its ID.
 
     Returns the same object shape as one entry in list_supplier_parts's
@@ -157,6 +165,9 @@ async def get_supplier_part(supplier_part_id: int) -> dict:
 
     Args:
         supplier_part_id: the SupplierPart's database ID.
+        filters: optional-field toggles beyond what's returned by default -
+            call describe_filters("supplier_part") and check its
+            optional_fields, e.g. filters={"supplier_detail": true}.
 
     Raises:
         ToolError: no supplier part exists with that ID, or the caller
@@ -169,4 +180,5 @@ async def get_supplier_part(supplier_part_id: int) -> dict:
         "GET",
         f"/api/company/part/{supplier_part_id}/",
         pk=supplier_part_id,
+        query_params=filters,
     )

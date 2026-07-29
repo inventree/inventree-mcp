@@ -65,7 +65,9 @@ async def list_stock_items(
 
 
 @mcp.tool()
-async def get_stock_item(stock_item_id: int) -> dict:
+async def get_stock_item(
+    stock_item_id: int, filters: dict[str, Any] | None = None
+) -> dict:
     """Get full detail for a single stock item by its ID.
 
     Returns the same object shape as one entry in list_stock_items's
@@ -74,6 +76,9 @@ async def get_stock_item(stock_item_id: int) -> dict:
 
     Args:
         stock_item_id: the StockItem's database ID.
+        filters: optional-field toggles beyond what's returned by default -
+            call describe_filters("stock") and check its optional_fields,
+            e.g. filters={"tests": true} to include test results inline.
 
     Raises:
         ToolError: no stock item exists with that ID, or the caller doesn't
@@ -82,5 +87,9 @@ async def get_stock_item(stock_item_id: int) -> dict:
     from stock.api import StockDetail
 
     return await call_view(
-        StockDetail, "GET", f"/api/stock/{stock_item_id}/", pk=stock_item_id
+        StockDetail,
+        "GET",
+        f"/api/stock/{stock_item_id}/",
+        pk=stock_item_id,
+        query_params=filters,
     )
