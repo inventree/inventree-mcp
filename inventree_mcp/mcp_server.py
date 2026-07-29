@@ -28,7 +28,7 @@ mcp = FastMCP(
 # Must run after the tool imports above - output_schemas.apply() attaches
 # output schemas to already-registered tools, and tool_visibility.apply()
 # needs discovery.RESOURCE_LOADERS (defined once discovery.py has run).
-from . import output_schemas, tool_visibility
+from . import output_schemas, tool_logging, tool_visibility
 from .tools import (  # noqa: F401
     attachments,
     bom,
@@ -50,3 +50,4 @@ from .tools import (  # noqa: F401
 
 output_schemas.apply()
 tool_visibility.apply()
+tool_logging.apply()

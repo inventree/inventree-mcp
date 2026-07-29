@@ -1715,18 +1715,16 @@ class MCPTransportTest(InvenTreeTestCase):
 
     @staticmethod
     def _initialize_body() -> str:
-        return json.dumps(
-            {
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "initialize",
-                "params": {
-                    "protocolVersion": "2025-06-18",
-                    "capabilities": {},
-                    "clientInfo": {"name": "test", "version": "0.1"},
-                },
-            }
-        )
+        return json.dumps({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-06-18",
+                "capabilities": {},
+                "clientInfo": {"name": "test", "version": "0.1"},
+            },
+        })
 
     def _post(self, client: Client | None = None, **headers) -> Any:
         client = client or Client(enforce_csrf_checks=True)
@@ -1740,14 +1738,12 @@ class MCPTransportTest(InvenTreeTestCase):
 
     @staticmethod
     def _list_tools_body() -> str:
-        return json.dumps(
-            {
-                "jsonrpc": "2.0",
-                "id": 2,
-                "method": "tools/list",
-                "params": {},
-            }
-        )
+        return json.dumps({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/list",
+            "params": {},
+        })
 
     def _list_tools(self, client: Client | None = None, **headers) -> Any:
         client = client or Client(enforce_csrf_checks=True)
@@ -1819,22 +1815,18 @@ class MCPTransportTest(InvenTreeTestCase):
         """
 
         async def fake_handle_request(self, scope, receive, send):
-            await send(
-                {
-                    "type": "http.response.start",
-                    "status": 200,
-                    "headers": [
-                        (b"content-type", b"application/json"),
-                        (b"connection", b"keep-alive"),
-                    ],
-                }
-            )
-            await send(
-                {
-                    "type": "http.response.body",
-                    "body": b'{"jsonrpc": "2.0", "id": 1, "result": {}}',
-                }
-            )
+            await send({
+                "type": "http.response.start",
+                "status": 200,
+                "headers": [
+                    (b"content-type", b"application/json"),
+                    (b"connection", b"keep-alive"),
+                ],
+            })
+            await send({
+                "type": "http.response.body",
+                "body": b'{"jsonrpc": "2.0", "id": 1, "result": {}}',
+            })
 
         with patch(
             "mcp.server.streamable_http_manager.StreamableHTTPSessionManager"
@@ -1872,6 +1864,105 @@ class MCPTransportTest(InvenTreeTestCase):
         self.assertIn("list_project_codes", names)
         self.assertNotIn("list_parts", names)
         self.assertNotIn("list_purchase_orders", names)
+
+
+@override_settings(PLUGIN_TESTING_SETUP=True)
+class ToolLoggingTest(InvenTreeTestCase):
+    """Verify MCP_LOG_TOOL_CALLS gates tool_logging.apply()'s real HTTP-level hook.
+
+    Same "must prove it reaches the real low-level handler, not just some
+    FastMCP-level helper a real request never touches" concern as
+    MCPTransportTest.test_tools_list_over_http_is_filtered_by_permission
+    above - tool_logging.apply() re-registers the low-level CallToolRequest
+    handler, which mcp.call_tool() (used by every other tool-calling test in
+    this file, e.g. OutputSchemaTest) deliberately bypasses - see
+    tool_logging.py's module docstring for why.
+    """
+
+    URL = "/plugin/inventree-mcp/mcp/"
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+
+        cls.api_token = ApiToken.objects.create(
+            user=cls.user, name="tool-logging-test-token"
+        ).key
+
+        registry.reload_plugins(full_reload=True, collect=True)
+        registry.set_plugin_state("inventree-mcp", True)
+
+    @staticmethod
+    def _call_tool_body(name: str, arguments: dict[str, Any] | None = None) -> str:
+        return json.dumps({
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "tools/call",
+            "params": {"name": name, "arguments": arguments or {}},
+        })
+
+    def _call_tool(self, name: str, arguments: dict[str, Any] | None = None) -> Any:
+        return Client(enforce_csrf_checks=True).post(
+            self.URL,
+            data=self._call_tool_body(name, arguments),
+            content_type="application/json",
+            HTTP_ACCEPT="application/json, text/event-stream",
+            HTTP_AUTHORIZATION=f"Token {self.api_token}",
+        )
+
+    def _enable_logging(self) -> None:
+        plugin = registry.get_plugin("inventree-mcp")
+        plugin.set_setting("MCP_LOG_TOOL_CALLS", True)
+        self.addCleanup(plugin.set_setting, "MCP_LOG_TOOL_CALLS", False)
+
+    def test_tool_call_is_not_logged_by_default(self):
+        """MCP_LOG_TOOL_CALLS defaults to False - logging must be fully opt-in."""
+        with patch("inventree_mcp.tool_logging.logger") as mock_logger:
+            response = self._call_tool("list_project_codes")
+
+        self.assertEqual(response.status_code, 200)
+        mock_logger.info.assert_not_called()
+
+    def test_successful_tool_call_is_logged_when_enabled(self):
+        self._enable_logging()
+
+        with patch("inventree_mcp.tool_logging.logger") as mock_logger:
+            response = self._call_tool("list_project_codes", {"limit": 1})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(mock_logger.info.call_count, 2)
+
+        start_args = mock_logger.info.call_args_list[0].args
+        self.assertIn("list_project_codes", start_args)
+        self.assertIn(self.username, start_args)
+
+        end_args = mock_logger.info.call_args_list[1].args
+        self.assertIn("succeeded", end_args[0])
+        self.assertIn("list_project_codes", end_args)
+        self.assertIn(self.username, end_args)
+
+    def test_failed_tool_call_is_logged_when_enabled(self):
+        """A ToolError (e.g. not found) must still be logged, not swallowed silently."""
+        self._enable_logging()
+
+        with patch("inventree_mcp.tool_logging.logger") as mock_logger:
+            response = self._call_tool("get_project_code", {"project_code_id": 999_999})
+
+        self.assertEqual(response.status_code, 200)
+        body = json.loads(response.content)
+        self.assertTrue(body["result"]["isError"])
+
+        # Only the start line goes through .info - the completion line for a
+        # failed call is logged at .warning instead (tool_logging.py's
+        # `except` branch), a deliberate severity distinction from the
+        # .info-only "succeeded" case above, so it can be filtered/alerted on
+        # separately in real logs.
+        self.assertEqual(mock_logger.info.call_count, 1)
+        self.assertEqual(mock_logger.warning.call_count, 1)
+
+        end_args = mock_logger.warning.call_args_list[0].args
+        self.assertIn("failed", end_args[0])
+        self.assertIn("get_project_code", end_args)
 
 
 class PluginSettingsTest(InvenTreeTestCase):
