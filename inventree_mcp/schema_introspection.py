@@ -1,6 +1,6 @@
 """Derive MCP tool output schemas from the real InvenTree DRF serializers.
 
-FastMCP can only auto-derive a tool's outputSchema from its Python return
+MCPServer can only auto-derive a tool's outputSchema from its Python return
 type annotation, and our tools return a bare `dict` (the actual shape comes
 from InvenTree's serializers and varies per endpoint) - so by default no
 output schema is reported at all. Rather than hand-write and maintain a

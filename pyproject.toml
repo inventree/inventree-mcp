@@ -19,8 +19,8 @@ license = "MIT"
 keywords = ["inventree", "plugin"]
 requires-python = ">=3.9"
 dependencies = [
-    # mcp 2.0.0 is a breaking rewrite (mcp.server.fastmcp -> mcp.server.mcpserver)
-    "mcp>=1.9,<2",
+    # mcp 2.0.0 was a breaking rewrite (mcp.server.fastmcp -> mcp.server.mcpserver)
+    "mcp>=2.0,<3",
 ]
 classifiers = [
     "Programming Language :: Python :: 3",

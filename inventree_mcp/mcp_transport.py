@@ -74,7 +74,7 @@ _HOP_BY_HOP_HEADERS = frozenset({
 def _new_session_manager() -> StreamableHTTPSessionManager:
     """StreamableHTTPSessionManager.run() can only be called once per instance."""
     return StreamableHTTPSessionManager(
-        app=mcp._mcp_server, json_response=True, stateless=True
+        app=mcp._lowlevel_server, json_response=True, stateless=True
     )
 
 

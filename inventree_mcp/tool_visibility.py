@@ -14,7 +14,7 @@ This is a discovery-time convenience, not a new security boundary:
 proxy.call_view() remains the only real enforcement point, and still runs in
 full for every actual tool call regardless of what tools/list showed - a
 client that calls a "hidden" tool by name gets exactly the same ToolError it
-always did (see FastMCP.call_tool()'s own tool lookup, which never
+always did (see MCPServer.call_tool()'s own tool lookup, which never
 consults this module). Don't rely on this module to prevent access to
 anything; it only prevents *advertising* access that doesn't exist.
 
@@ -38,13 +38,15 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import TYPE_CHECKING
 
+from mcp.types import ListToolsResult, PaginatedRequestParams
+
 from . import proxy
 from .context import has_current_user
 from .mcp_server import mcp
 from .tools.discovery import RESOURCE_LOADERS
 
 if TYPE_CHECKING:
-    from mcp.types import Tool
+    from mcp.server.context import ServerRequestContext
 
 # Maps every gated tool name to the discovery.py resource key whose List
 # view's GET permission determines whether it's shown. list_X/get_X
@@ -150,21 +152,30 @@ async def visible_tool_names(names: Iterable[str]) -> set[str]:
 def apply() -> None:
     """Make the real (low-level, transport-facing) tools/list handler permission-aware.
 
-    FastMCP.list_tools() is left untouched as an attribute - it's reassigned
+    MCPServer.list_tools() is left untouched as an attribute - it's reassigned
     *around*, not in place, specifically so existing tests that call
     mcp.list_tools() directly to introspect the full, unfiltered registry
     (e.g. "every tool has an output_schema") keep working unchanged. What
-    this actually overrides is mcp.server.lowlevel.Server's registered
-    ListToolsRequest handler - the thing a real client's tools/list request
-    reaches over the wire (see mcp_transport.py) - by re-registering it, the
-    same "no public API for this, reach into internals" approach
-    output_schemas.apply() already uses for a different FastMCP internal.
+    this actually overrides is the low-level mcp.server.lowlevel.Server's
+    registered "tools/list" request handler - the thing a real client's
+    tools/list request reaches over the wire (see mcp_transport.py) - by
+    re-registering it via add_request_handler(), the same "no public API for
+    this, reach into internals" approach output_schemas.apply() already uses
+    for a different MCPServer internal. mcp 2.0's rewrite replaced the
+    lowlevel Server's decorator-based `.list_tools()` registration with
+    add_request_handler(method, params_type, handler) - the handler itself
+    now takes (ctx, params) and must return a ListToolsResult, rather than a
+    bare list[Tool].
     """
     unfiltered_list_tools = mcp.list_tools
 
-    async def filtered_list_tools() -> list[Tool]:
+    async def filtered_list_tools(
+        ctx: ServerRequestContext, params: PaginatedRequestParams | None
+    ) -> ListToolsResult:
         tools = await unfiltered_list_tools()
         names = await visible_tool_names(tool.name for tool in tools)
-        return [tool for tool in tools if tool.name in names]
+        return ListToolsResult(tools=[tool for tool in tools if tool.name in names])
 
-    mcp._mcp_server.list_tools()(filtered_list_tools)
+    mcp._lowlevel_server.add_request_handler(
+        "tools/list", PaginatedRequestParams, filtered_list_tools
+    )

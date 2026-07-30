@@ -22,8 +22,8 @@ duplicate the check per-tool or bypass `call_view()`.
 - `proxy.py` - `call_view()`, the permission boundary described above.
 - `settings.py` - `get_plugin_setting()` for this plugin's own settings (`REQUIRE_AUTH`,
   `MCP_READ_ONLY`).
-- `mcp_server.py` - the `FastMCP` instance; imports `tools/*` for their `@mcp.tool()` side effect.
-- `mcp_transport.py` - Django view bridging Streamable HTTP onto the FastMCP server.
+- `mcp_server.py` - the `MCPServer` instance; imports `tools/*` for their `@mcp.tool()` side effect.
+- `mcp_transport.py` - Django view bridging Streamable HTTP onto the MCP server.
 - `oauth2_bridge.py` - lets `call_view()` present an OAuth2-authenticated request's real token to
   the proxied view, and works around upstream InvenTree OAuth2 scope-enforcement bugs.
 - `tools/` - one module per resource, each a thin async wrapper around `call_view()`;
