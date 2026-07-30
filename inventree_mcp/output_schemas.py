@@ -1,8 +1,8 @@
 """Attach dynamically-derived output schemas to registered MCP tools.
 
-FastMCP only derives a tool's outputSchema from its Python return type
+MCPServer only derives a tool's outputSchema from its Python return type
 annotation (see schema_introspection.py's module docstring for why that
-doesn't work for us). There's no public FastMCP API to supply a schema
+doesn't work for us). There's no public MCPServer API to supply a schema
 directly - @mcp.tool() / mcp.add_tool() only accept a `structured_output`
 bool, not a schema override - so this reaches into the tool registry after
 normal registration and sets Tool.fn_metadata.output_schema directly.
@@ -11,10 +11,10 @@ Tool.output_schema is a @cached_property reading fn_metadata.output_schema,
 so this only works if it runs before anything has read a given tool's
 output_schema for the first time - true here, since apply() runs at import
 time (see mcp_server.py), before any real request can occur. This is pinned
-to current FastMCP internals (_tool_manager, fn_metadata); re-verify by hand
-if the `mcp` package version changes.
+to current MCPServer internals (_tool_manager, fn_metadata); re-verify by
+hand if the `mcp` package version changes.
 
-fn_metadata.output_model must also be set alongside output_schema: FastMCP
+fn_metadata.output_model must also be set alongside output_schema: MCPServer
 validates every *actual* tool result against output_model at call time
 (func_metadata.py's convert_result(), independent of what output_schema
 merely declares), and asserts if a schema is set with no model - a real

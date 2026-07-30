@@ -13,7 +13,7 @@ import json
 from typing import Any
 
 from asgiref.sync import sync_to_async
-from mcp.server.fastmcp.exceptions import ToolError
+from mcp.server.mcpserver.exceptions import ToolError
 from rest_framework import exceptions
 from rest_framework.test import APIRequestFactory, force_authenticate
 from rest_framework.views import APIView
@@ -193,7 +193,7 @@ async def call_view(
             message is safe to surface to the calling agent.
 
     Note:
-        FastMCP calls tool functions directly in the request's event loop, and
+        MCPServer calls tool functions directly in the request's event loop, and
         the actual view dispatch does synchronous Django ORM work - so it must
         be handed off via sync_to_async, or Django raises
         SynchronousOnlyOperation. thread_sensitive=True (the default) matters

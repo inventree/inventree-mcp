@@ -27,7 +27,8 @@ from django.contrib.contenttypes.models import ContentType
 from django.test import Client, override_settings
 from django.utils import timezone
 from InvenTree.unit_test import InvenTreeTestCase
-from mcp.server.fastmcp.exceptions import ToolError
+from mcp.server.mcpserver.exceptions import ToolError
+from mcp.types import CallToolResult
 from oauth2_provider.models import AccessToken, Application
 from order.models import (
     PurchaseOrder,
@@ -1235,7 +1236,7 @@ class ToolVisibilityTest(InvenTreeTestCase):
 class OutputSchemaTest(InvenTreeTestCase):
     """Verify tool output schemas are derived from the real serializers, not left blank.
 
-    Without output_schemas.apply(), FastMCP can't derive a schema from our
+    Without output_schemas.apply(), MCPServer can't derive a schema from our
     tools' `-> dict` return annotation and reports outputSchema: null - see
     schema_introspection.py / output_schemas.py for why and how.
     """
@@ -1317,19 +1318,19 @@ class OutputSchemaTest(InvenTreeTestCase):
         """The live tool registry (as a real MCP client would see via tools/list) must have these attached."""
         tools = {tool.name: tool for tool in await mcp.list_tools()}
 
-        self.assertIsNotNone(tools["list_parts"].outputSchema)
-        self.assertIn("results", tools["list_parts"].outputSchema["properties"])
+        self.assertIsNotNone(tools["list_parts"].output_schema)
+        self.assertIn("results", tools["list_parts"].output_schema["properties"])
 
-        self.assertIsNotNone(tools["get_part"].outputSchema)
-        self.assertIn("name", tools["get_part"].outputSchema["properties"])
+        self.assertIsNotNone(tools["get_part"].output_schema)
+        self.assertIn("name", tools["get_part"].output_schema["properties"])
 
-        self.assertIsNotNone(tools["list_purchase_orders"].outputSchema)
-        self.assertIsNotNone(tools["get_build_item"].outputSchema)
-        self.assertIsNotNone(tools["list_companies"].outputSchema)
-        self.assertIsNotNone(tools["get_supplier_part"].outputSchema)
-        self.assertIsNotNone(tools["list_return_orders"].outputSchema)
-        self.assertIsNotNone(tools["get_stock_tracking"].outputSchema)
-        self.assertIsNotNone(tools["list_project_codes"].outputSchema)
+        self.assertIsNotNone(tools["list_purchase_orders"].output_schema)
+        self.assertIsNotNone(tools["get_build_item"].output_schema)
+        self.assertIsNotNone(tools["list_companies"].output_schema)
+        self.assertIsNotNone(tools["get_supplier_part"].output_schema)
+        self.assertIsNotNone(tools["list_return_orders"].output_schema)
+        self.assertIsNotNone(tools["get_stock_tracking"].output_schema)
+        self.assertIsNotNone(tools["list_project_codes"].output_schema)
 
     async def test_every_registered_tool_has_an_output_schema(self):
         """Guard against a new tool being added without a matching entry in output_schemas.py."""
@@ -1338,7 +1339,7 @@ class OutputSchemaTest(InvenTreeTestCase):
         missing = [
             tool.name
             for tool in tools
-            if tool.name != "describe_filters" and tool.outputSchema is None
+            if tool.name != "describe_filters" and tool.output_schema is None
         ]
         self.assertEqual(missing, [])
 
@@ -1346,7 +1347,7 @@ class OutputSchemaTest(InvenTreeTestCase):
         """Regression test: declaring output_schema without a matching output_model breaks every real call.
 
         mcp.list_tools() (tested above) only exercises tool *listing* -
-        FastMCP separately validates every actual result against
+        MCPServer separately validates every actual result against
         fn_metadata.output_model when a tool is *called*
         (func_metadata.py's convert_result()), and raises
         "Output model must be set if output schema is defined" if a schema
@@ -1358,28 +1359,35 @@ class OutputSchemaTest(InvenTreeTestCase):
 
         result = await mcp.call_tool("list_parts", {"limit": 1})
 
-        # call_tool() returns (content_blocks, structured_content) once an
-        # output_model is attached.
-        self.assertIsInstance(result, tuple)
-        _content, structured = result
-        self.assertIn("results", structured)
+        # call_tool() returns a CallToolResult once an output_model is
+        # attached (mcp 1.x returned a bare (content_blocks,
+        # structured_content) tuple instead).
+        self.assertIsInstance(result, CallToolResult)
+        self.assertFalse(result.is_error)
+        self.assertIn("results", result.structured_content)
 
     async def test_output_schema_accepts_real_nullable_field_values(self):
         """Regression test for a real bug found via a live trial run, not a hypothetical.
 
-        `mcp.call_tool()` (used above) only exercises FastMCP's *permissive*
-        output_model validation (func_metadata.py's convert_result()) - real
-        requests over HTTP go through a second, separate, strict validation
-        in mcp.server.lowlevel.server.py's call_tool handler:
-        `jsonschema.validate(instance=structured_content, schema=tool.outputSchema)`.
-        That one enforces our *declared* schema for real, and DRF's
-        `allow_null` (what schema_introspection.py used to key off of) does
-        NOT reliably predict what to_representation() can emit: PartSerializer
-        declares IPN with allow_null=False, but Part.IPN is a nullable
-        CharField - a real part with IPN=None broke every list_parts call
-        with more than one page of real data ("None is not of type
-        'string'"), reproduced live against the running dev server, not
-        just in a unit test. See schema_introspection.py's _field_schema().
+        `mcp.call_tool()` (used above) only exercises MCPServer's *permissive*
+        output_model validation (func_metadata.py's convert_result()). mcp 1.x
+        additionally ran a second, strict validation for every real request
+        over HTTP - `jsonschema.validate(instance=structured_content,
+        schema=tool.outputSchema)` inside mcp.server.lowlevel.server.py's
+        call_tool handler - but mcp 2.0's rewrite dropped that path entirely
+        (verified against the installed `mcp` package: a deliberately
+        schema-violating structured result now comes back as
+        `is_error=False`, not rejected). This test therefore validates our
+        *declared* schema by hand instead, via jsonschema.validate() below -
+        it's the only thing left enforcing that outputSchema actually
+        describes what tools return. DRF's `allow_null` (what
+        schema_introspection.py used to key off of) does NOT reliably predict
+        what to_representation() can emit: PartSerializer declares IPN with
+        allow_null=False, but Part.IPN is a nullable CharField - a real part
+        with IPN=None broke every list_parts call with more than one page of
+        real data ("None is not of type 'string'"), reproduced live against
+        the running dev server, not just in a unit test. See
+        schema_introspection.py's _field_schema().
         """
         context.set_current_user(self.user)
         self.addCleanup(context.set_current_user, None)
@@ -1846,7 +1854,7 @@ class MCPTransportTest(InvenTreeTestCase):
         ToolVisibilityTest (elsewhere in this file) already covers
         visible_tool_names() directly, but that alone doesn't prove the
         override actually reaches a real client's tools/list request over the
-        wire, rather than only affecting some FastMCP-level helper a real
+        wire, rather than only affecting some MCPServer-level helper a real
         request never touches - exactly the "tested via mcp.call_tool() isn't
         tested for real" distinction this codebase has been bitten by before
         (see AGENTS.md's Output schemas section).
@@ -1871,7 +1879,7 @@ class ToolLoggingTest(InvenTreeTestCase):
     """Verify MCP_LOG_TOOL_CALLS gates tool_logging.apply()'s real HTTP-level hook.
 
     Same "must prove it reaches the real low-level handler, not just some
-    FastMCP-level helper a real request never touches" concern as
+    MCPServer-level helper a real request never touches" concern as
     MCPTransportTest.test_tools_list_over_http_is_filtered_by_permission
     above - tool_logging.apply() re-registers the low-level CallToolRequest
     handler, which mcp.call_tool() (used by every other tool-calling test in
