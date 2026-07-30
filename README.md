@@ -30,19 +30,18 @@ permission-checked in full regardless of what was advertised.
 
 ### 1. Install the plugin
 
+Install via the InvenTree plugin manager, or via pip:
+
 ```bash
 pip install inventree-mcp
 ```
 
-(Installation via the InvenTree Plugin Manager UI is not yet supported.)
-
-Then enable the plugin under **Settings > Plugins**, and configure its settings (see
+Then enable the plugin under **Admin > Plugins**, and configure its settings (see
 Configuration below).
 
 ### 2. Create a token for your MCP client
 
-Create an InvenTree API token for a user with only the roles the client actually needs (e.g.
-`part.view`, `stock.view`) - avoid reusing an admin account.
+Create an InvenTree API token for your MCP client.
 
 ### 3. Configure your MCP client
 
