@@ -7,174 +7,126 @@ from mcp.server.mcpserver.exceptions import ToolError
 from ..expand_introspection import describe_output_options
 from ..filter_introspection import describe_filterset
 from ..mcp_server import mcp
+from ..view_resolution import resolve_view
 
 
-def _part_list() -> type:
-    from part.api import PartList
+def _part_list() -> type | None:
+    return resolve_view("part.api", "PartList")
 
-    return PartList
 
+def _stock_list() -> type | None:
+    return resolve_view("stock.api", "StockList")
 
-def _stock_list() -> type:
-    from stock.api import StockList
 
-    return StockList
+def _stock_location_list() -> type | None:
+    return resolve_view("stock.api", "StockLocationList")
 
 
-def _stock_location_list() -> type:
-    from stock.api import StockLocationList
+def _category_list() -> type | None:
+    return resolve_view("part.api", "CategoryList")
 
-    return StockLocationList
 
+def _purchase_order_list() -> type | None:
+    return resolve_view("order.api", "PurchaseOrderList")
 
-def _category_list() -> type:
-    from part.api import CategoryList
 
-    return CategoryList
+def _purchase_order_line_list() -> type | None:
+    return resolve_view("order.api", "PurchaseOrderLineItemList")
 
 
-def _purchase_order_list() -> type:
-    from order.api import PurchaseOrderList
+def _sales_order_list() -> type | None:
+    return resolve_view("order.api", "SalesOrderList")
 
-    return PurchaseOrderList
 
+def _sales_order_line_list() -> type | None:
+    return resolve_view("order.api", "SalesOrderLineItemList")
 
-def _purchase_order_line_list() -> type:
-    from order.api import PurchaseOrderLineItemList
 
-    return PurchaseOrderLineItemList
+def _sales_order_allocation_list() -> type | None:
+    return resolve_view("order.api", "SalesOrderAllocationList")
 
 
-def _sales_order_list() -> type:
-    from order.api import SalesOrderList
+def _build_order_list() -> type | None:
+    return resolve_view("build.api", "BuildList")
 
-    return SalesOrderList
 
+def _build_line_list() -> type | None:
+    return resolve_view("build.api", "BuildLineList")
 
-def _sales_order_line_list() -> type:
-    from order.api import SalesOrderLineItemList
 
-    return SalesOrderLineItemList
+def _build_item_list() -> type | None:
+    return resolve_view("build.api", "BuildItemList")
 
 
-def _sales_order_allocation_list() -> type:
-    from order.api import SalesOrderAllocationList
+def _company_list() -> type | None:
+    return resolve_view("company.api", "CompanyList")
 
-    return SalesOrderAllocationList
 
+def _contact_list() -> type | None:
+    return resolve_view("company.api", "ContactList")
 
-def _build_order_list() -> type:
-    from build.api import BuildList
 
-    return BuildList
+def _address_list() -> type | None:
+    return resolve_view("company.api", "AddressList")
 
 
-def _build_line_list() -> type:
-    from build.api import BuildLineList
+def _manufacturer_part_list() -> type | None:
+    return resolve_view("company.api", "ManufacturerPartList")
 
-    return BuildLineList
 
+def _supplier_part_list() -> type | None:
+    return resolve_view("company.api", "SupplierPartList")
 
-def _build_item_list() -> type:
-    from build.api import BuildItemList
 
-    return BuildItemList
+def _bom_item_list() -> type | None:
+    return resolve_view("part.api", "BomList")
 
 
-def _company_list() -> type:
-    from company.api import CompanyList
+def _bom_substitute_list() -> type | None:
+    return resolve_view("part.api", "BomItemSubstituteList")
 
-    return CompanyList
 
+def _attachment_list() -> type | None:
+    return resolve_view("common.api", "AttachmentList")
 
-def _contact_list() -> type:
-    from company.api import ContactList
 
-    return ContactList
+def _parameter_list() -> type | None:
+    return resolve_view("common.api", "ParameterList")
 
 
-def _address_list() -> type:
-    from company.api import AddressList
+def _parameter_template_list() -> type | None:
+    return resolve_view("common.api", "ParameterTemplateList")
 
-    return AddressList
 
+def _return_order_list() -> type | None:
+    return resolve_view("order.api", "ReturnOrderList")
 
-def _manufacturer_part_list() -> type:
-    from company.api import ManufacturerPartList
 
-    return ManufacturerPartList
+def _return_order_line_list() -> type | None:
+    return resolve_view("order.api", "ReturnOrderLineItemList")
 
 
-def _supplier_part_list() -> type:
-    from company.api import SupplierPartList
+def _stock_tracking_list() -> type | None:
+    return resolve_view("stock.api", "StockTrackingList")
 
-    return SupplierPartList
 
+def _stock_test_result_list() -> type | None:
+    return resolve_view("stock.api", "StockItemTestResultList")
 
-def _bom_item_list() -> type:
-    from part.api import BomList
 
-    return BomList
-
-
-def _bom_substitute_list() -> type:
-    from part.api import BomItemSubstituteList
-
-    return BomItemSubstituteList
-
-
-def _attachment_list() -> type:
-    from common.api import AttachmentList
-
-    return AttachmentList
-
-
-def _parameter_list() -> type:
-    from common.api import ParameterList
-
-    return ParameterList
-
-
-def _parameter_template_list() -> type:
-    from common.api import ParameterTemplateList
-
-    return ParameterTemplateList
-
-
-def _return_order_list() -> type:
-    from order.api import ReturnOrderList
-
-    return ReturnOrderList
-
-
-def _return_order_line_list() -> type:
-    from order.api import ReturnOrderLineItemList
-
-    return ReturnOrderLineItemList
-
-
-def _stock_tracking_list() -> type:
-    from stock.api import StockTrackingList
-
-    return StockTrackingList
-
-
-def _stock_test_result_list() -> type:
-    from stock.api import StockItemTestResultList
-
-    return StockItemTestResultList
-
-
-def _project_code_list() -> type:
-    from common.api import ProjectCodeList
-
-    return ProjectCodeList
+def _project_code_list() -> type | None:
+    return resolve_view("common.api", "ProjectCodeList")
 
 
 # Values are loader functions, not the view classes directly, so each import
 # stays lazy (matches tools/*.py's own per-call imports) - importing e.g.
 # part.api at module level risks AppRegistryNotReady if InvenTree's plugin
-# registry scans this module before Django's app registry is ready.
+# registry scans this module before Django's app registry is ready. Each
+# loader now goes through view_resolution.resolve_view() rather than a bare
+# `from x.api import Y`, so a class that's been renamed or removed in the
+# running InvenTree core (a version mismatch between this plugin and core)
+# resolves to None instead of raising ImportError - callers below and in
+# tool_visibility.py treat that the same as "not visible"/"not permitted".
 # Not module-private (no leading underscore): tool_visibility.py also reads
 # this to resolve a resource's view class for a permission check, rather
 # than duplicating 27 loader functions.
@@ -270,6 +222,13 @@ def describe_filters(resource: str) -> dict:
         )
 
     view_cls = loader()
+
+    if view_cls is None:
+        raise ToolError(
+            f"{resource!r} is unavailable on this InvenTree instance (its "
+            "API endpoint could not be found - likely a version mismatch "
+            "between this plugin and the running InvenTree core)."
+        )
 
     return {
         **describe_filterset(view_cls),

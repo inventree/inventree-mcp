@@ -25,6 +25,7 @@ from typing import Any
 
 from ..mcp_server import mcp
 from ..proxy import call_view
+from ..view_resolution import resolve_view
 from ._common import build_query_params
 
 
@@ -81,8 +82,6 @@ async def list_bom_items(
         limit: maximum number of results to return (capped at 100).
         offset: pagination offset.
     """
-    from part.api import BomList
-
     base: dict[str, Any] = {}
     if part is not None:
         base["part"] = part
@@ -95,7 +94,9 @@ async def list_bom_items(
 
     params = build_query_params(base, filters, limit, offset)
 
-    return await call_view(BomList, "GET", "/api/bom/", query_params=params)
+    return await call_view(
+        resolve_view("part.api", "BomList"), "GET", "/api/bom/", query_params=params
+    )
 
 
 @mcp.tool()
@@ -115,10 +116,8 @@ async def get_bom_item(bom_item_id: int, filters: dict[str, Any] | None = None) 
         ToolError: no BOM item exists with that ID, or the caller doesn't
             have permission to view it.
     """
-    from part.api import BomDetail
-
     return await call_view(
-        BomDetail,
+        resolve_view("part.api", "BomDetail"),
         "GET",
         f"/api/bom/{bom_item_id}/",
         pk=bom_item_id,
@@ -161,8 +160,6 @@ async def list_bom_substitutes(
         limit: maximum number of results to return (capped at 100).
         offset: pagination offset.
     """
-    from part.api import BomItemSubstituteList
-
     base: dict[str, Any] = {}
     if bom_item is not None:
         base["bom_item"] = bom_item
@@ -174,7 +171,10 @@ async def list_bom_substitutes(
     params = build_query_params(base, filters, limit, offset)
 
     return await call_view(
-        BomItemSubstituteList, "GET", "/api/bom/substitute/", query_params=params
+        resolve_view("part.api", "BomItemSubstituteList"),
+        "GET",
+        "/api/bom/substitute/",
+        query_params=params,
     )
 
 
@@ -198,10 +198,8 @@ async def get_bom_substitute(
         ToolError: no substitute entry exists with that ID, or the caller
             doesn't have permission to view it.
     """
-    from part.api import BomItemSubstituteDetail
-
     return await call_view(
-        BomItemSubstituteDetail,
+        resolve_view("part.api", "BomItemSubstituteDetail"),
         "GET",
         f"/api/bom/substitute/{substitute_id}/",
         pk=substitute_id,

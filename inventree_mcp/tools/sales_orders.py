@@ -6,6 +6,7 @@ from typing import Any
 
 from ..mcp_server import mcp
 from ..proxy import call_view
+from ..view_resolution import resolve_view
 from ._common import build_query_params
 
 
@@ -48,8 +49,6 @@ async def list_sales_orders(
         limit: maximum number of results to return (capped at 100).
         offset: pagination offset.
     """
-    from order.api import SalesOrderList
-
     base: dict[str, Any] = {}
     if customer is not None:
         base["customer"] = customer
@@ -62,7 +61,12 @@ async def list_sales_orders(
 
     params = build_query_params(base, filters, limit, offset)
 
-    return await call_view(SalesOrderList, "GET", "/api/order/so/", query_params=params)
+    return await call_view(
+        resolve_view("order.api", "SalesOrderList"),
+        "GET",
+        "/api/order/so/",
+        query_params=params,
+    )
 
 
 @mcp.tool()
@@ -86,10 +90,8 @@ async def get_sales_order(order_id: int, filters: dict[str, Any] | None = None) 
         ToolError: no sales order exists with that ID, or the caller
             doesn't have permission to view it.
     """
-    from order.api import SalesOrderDetail
-
     return await call_view(
-        SalesOrderDetail,
+        resolve_view("order.api", "SalesOrderDetail"),
         "GET",
         f"/api/order/so/{order_id}/",
         pk=order_id,
@@ -134,8 +136,6 @@ async def list_sales_order_lines(
         limit: maximum number of results to return (capped at 100).
         offset: pagination offset.
     """
-    from order.api import SalesOrderLineItemList
-
     base: dict[str, Any] = {}
     if order is not None:
         base["order"] = order
@@ -151,7 +151,10 @@ async def list_sales_order_lines(
     params = build_query_params(base, filters, limit, offset)
 
     return await call_view(
-        SalesOrderLineItemList, "GET", "/api/order/so-line/", query_params=params
+        resolve_view("order.api", "SalesOrderLineItemList"),
+        "GET",
+        "/api/order/so-line/",
+        query_params=params,
     )
 
 
@@ -175,10 +178,8 @@ async def get_sales_order_line(
         ToolError: no line item exists with that ID, or the caller doesn't
             have permission to view it.
     """
-    from order.api import SalesOrderLineItemDetail
-
     return await call_view(
-        SalesOrderLineItemDetail,
+        resolve_view("order.api", "SalesOrderLineItemDetail"),
         "GET",
         f"/api/order/so-line/{line_id}/",
         pk=line_id,
@@ -227,8 +228,6 @@ async def list_sales_order_allocations(
         limit: maximum number of results to return (capped at 100).
         offset: pagination offset.
     """
-    from order.api import SalesOrderAllocationList
-
     base: dict[str, Any] = {}
     if order is not None:
         base["order"] = order
@@ -244,7 +243,7 @@ async def list_sales_order_allocations(
     params = build_query_params(base, filters, limit, offset)
 
     return await call_view(
-        SalesOrderAllocationList,
+        resolve_view("order.api", "SalesOrderAllocationList"),
         "GET",
         "/api/order/so-allocation/",
         query_params=params,
@@ -272,10 +271,8 @@ async def get_sales_order_allocation(
         ToolError: no allocation exists with that ID, or the caller doesn't
             have permission to view it.
     """
-    from order.api import SalesOrderAllocationDetail
-
     return await call_view(
-        SalesOrderAllocationDetail,
+        resolve_view("order.api", "SalesOrderAllocationDetail"),
         "GET",
         f"/api/order/so-allocation/{allocation_id}/",
         pk=allocation_id,

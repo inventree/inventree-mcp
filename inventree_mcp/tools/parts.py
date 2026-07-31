@@ -11,6 +11,7 @@ from typing import Any
 
 from ..mcp_server import mcp
 from ..proxy import call_view
+from ..view_resolution import resolve_view
 from ._common import build_query_params
 
 
@@ -48,8 +49,6 @@ async def list_parts(
         limit: maximum number of results to return (capped at 100).
         offset: pagination offset.
     """
-    from part.api import PartList
-
     base: dict[str, Any] = {}
     if search is not None:
         base["search"] = search
@@ -62,7 +61,9 @@ async def list_parts(
 
     params = build_query_params(base, filters, limit, offset)
 
-    return await call_view(PartList, "GET", "/api/part/", query_params=params)
+    return await call_view(
+        resolve_view("part.api", "PartList"), "GET", "/api/part/", query_params=params
+    )
 
 
 @mcp.tool()
@@ -83,8 +84,10 @@ async def get_part(part_id: int, filters: dict[str, Any] | None = None) -> dict:
         ToolError: no part exists with that ID, or the caller doesn't have
             permission to view it.
     """
-    from part.api import PartDetail
-
     return await call_view(
-        PartDetail, "GET", f"/api/part/{part_id}/", pk=part_id, query_params=filters
+        resolve_view("part.api", "PartDetail"),
+        "GET",
+        f"/api/part/{part_id}/",
+        pk=part_id,
+        query_params=filters,
     )

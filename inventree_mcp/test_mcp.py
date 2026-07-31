@@ -52,7 +52,7 @@ from stock.models import (
 )
 from users.models import ApiToken
 
-from . import context, tool_visibility
+from . import context, tool_visibility, view_resolution
 from .filter_introspection import _default_ordering_fields
 from .mcp_server import mcp
 from .proxy import call_view
@@ -83,7 +83,7 @@ from .tools.companies import (
     list_companies,
     list_contacts,
 )
-from .tools.discovery import describe_filters
+from .tools.discovery import RESOURCE_LOADERS, describe_filters
 from .tools.locations import get_location, list_locations
 from .tools.parameters import (
     get_parameter,
@@ -1216,6 +1216,25 @@ class ToolVisibilityTest(InvenTreeTestCase):
 
         self.assertEqual(names, all_names)
 
+    async def test_unavailable_resource_hides_its_tools_without_crashing(self):
+        """A resource whose loader can't resolve its view class (e.g. a
+        version mismatch between this plugin and the running InvenTree core
+        - see view_resolution.resolve_view()) must be treated as "not
+        visible", not raise and take down the whole tools/list response for
+        every tool, gated or not.
+        """
+        self._as(self.user)
+
+        with patch.dict(RESOURCE_LOADERS, {"part": lambda: None}):
+            names = await tool_visibility.visible_tool_names(
+                tool.name for tool in await mcp.list_tools()
+            )
+
+        self.assertNotIn("list_parts", names)
+        self.assertNotIn("get_part", names)
+        # An ungated tool (no underlying view to fail) must be unaffected.
+        self.assertIn("describe_filters", names)
+
     async def test_every_gated_tool_has_a_visibility_entry(self):
         """Guard against a future tool shipping without a _TOOL_RESOURCES entry.
 
@@ -1231,6 +1250,60 @@ class ToolVisibilityTest(InvenTreeTestCase):
         )
 
         self.assertEqual(unmapped, set())
+
+
+class ViewResolutionTest(unittest.TestCase):
+    """resolve_view() must tolerate a missing/renamed view class - the case a
+    mismatched InvenTree core version (relative to this plugin) produces -
+    instead of letting ImportError/AttributeError escape, and must not
+    re-attempt (or re-log) an import it already knows fails.
+    """
+
+    def setUp(self):
+        super().setUp()
+        # _unresolved is a module-level cache that deliberately persists for
+        # the life of the process (see resolve_view's docstring) - tests
+        # must isolate their own entries from it explicitly rather than
+        # relying on it emptying itself between tests.
+        before = set(view_resolution._unresolved)
+        self.addCleanup(view_resolution._unresolved.clear)
+        self.addCleanup(view_resolution._unresolved.update, before)
+
+    def test_resolves_a_real_view_class(self):
+        self.assertIs(view_resolution.resolve_view("part.api", "PartList"), PartList)
+
+    def test_returns_none_for_a_class_that_does_not_exist(self):
+        self.assertIsNone(view_resolution.resolve_view("part.api", "NotARealViewClass"))
+
+    def test_returns_none_for_a_module_that_does_not_exist(self):
+        self.assertIsNone(view_resolution.resolve_view("not.a.real.module", "Whatever"))
+
+    def test_caches_a_failure_without_re_importing(self):
+        with patch(
+            "inventree_mcp.view_resolution.import_module",
+            side_effect=ImportError("boom"),
+        ) as mock_import:
+            self.assertIsNone(view_resolution.resolve_view("some.fake.module", "X"))
+            self.assertIsNone(view_resolution.resolve_view("some.fake.module", "X"))
+
+        mock_import.assert_called_once()
+
+
+class CallViewImportSafetyTest(InvenTreeTestCase):
+    """call_view(None, ...) must raise a clean ToolError, not an AttributeError.
+
+    Exercises the case every tools/*.py call site hits when
+    view_resolution.resolve_view() couldn't import a tool's underlying view
+    class - proxy.call_view() is the one place that's turned into the same
+    ToolError contract every other call_view() failure already has, rather
+    than requiring each of the ~50 call sites to check for None themselves.
+    """
+
+    async def test_call_view_rejects_a_missing_view_class(self):
+        with self.assertRaises(ToolError) as cm:
+            await call_view(None, "GET", "/api/part/")
+
+        self.assertIn("unavailable", str(cm.exception).lower())
 
 
 class OutputSchemaTest(InvenTreeTestCase):
@@ -1587,6 +1660,18 @@ class DescribeFiltersTest(InvenTreeTestCase):
     def test_describe_filters_rejects_unknown_resource(self):
         with self.assertRaises(ToolError):
             describe_filters("not-a-real-resource")
+
+    def test_describe_filters_rejects_unavailable_resource(self):
+        """A known resource whose loader can't resolve its view class (e.g. a
+        version mismatch between this plugin and the running InvenTree core
+        - see view_resolution.resolve_view()) must raise a clean ToolError,
+        not an AttributeError from treating None as a view class.
+        """
+        with (
+            patch.dict(RESOURCE_LOADERS, {"part": lambda: None}),
+            self.assertRaises(ToolError),
+        ):
+            describe_filters("part")
 
     def test_describe_filters_falls_back_to_default_ordering_fields(self):
         """BomItemSubstituteList doesn't declare `ordering_fields` at all - regression

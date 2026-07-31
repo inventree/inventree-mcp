@@ -6,6 +6,7 @@ from typing import Any
 
 from ..mcp_server import mcp
 from ..proxy import call_view
+from ..view_resolution import resolve_view
 from ._common import build_query_params
 
 
@@ -43,8 +44,6 @@ async def list_categories(
         limit: maximum number of results to return (capped at 100).
         offset: pagination offset.
     """
-    from part.api import CategoryList
-
     base: dict[str, Any] = {}
     if search is not None:
         base["search"] = search
@@ -56,7 +55,10 @@ async def list_categories(
     params = build_query_params(base, filters, limit, offset)
 
     return await call_view(
-        CategoryList, "GET", "/api/part/category/", query_params=params
+        resolve_view("part.api", "CategoryList"),
+        "GET",
+        "/api/part/category/",
+        query_params=params,
     )
 
 
@@ -77,10 +79,8 @@ async def get_category(category_id: int, filters: dict[str, Any] | None = None) 
         ToolError: no category exists with that ID, or the caller doesn't
             have permission to view it.
     """
-    from part.api import CategoryDetail
-
     return await call_view(
-        CategoryDetail,
+        resolve_view("part.api", "CategoryDetail"),
         "GET",
         f"/api/part/category/{category_id}/",
         pk=category_id,

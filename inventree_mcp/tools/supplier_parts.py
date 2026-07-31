@@ -11,6 +11,7 @@ from typing import Any
 
 from ..mcp_server import mcp
 from ..proxy import call_view
+from ..view_resolution import resolve_view
 from ._common import build_query_params
 
 
@@ -45,8 +46,6 @@ async def list_manufacturer_parts(
         limit: maximum number of results to return (capped at 100).
         offset: pagination offset.
     """
-    from company.api import ManufacturerPartList
-
     base: dict[str, Any] = {}
     if part is not None:
         base["part"] = part
@@ -58,7 +57,7 @@ async def list_manufacturer_parts(
     params = build_query_params(base, filters, limit, offset)
 
     return await call_view(
-        ManufacturerPartList,
+        resolve_view("company.api", "ManufacturerPartList"),
         "GET",
         "/api/company/part/manufacturer/",
         query_params=params,
@@ -85,10 +84,8 @@ async def get_manufacturer_part(
         ToolError: no manufacturer part exists with that ID, or the caller
             doesn't have permission to view it.
     """
-    from company.api import ManufacturerPartDetail
-
     return await call_view(
-        ManufacturerPartDetail,
+        resolve_view("company.api", "ManufacturerPartDetail"),
         "GET",
         f"/api/company/part/manufacturer/{manufacturer_part_id}/",
         pk=manufacturer_part_id,
@@ -134,8 +131,6 @@ async def list_supplier_parts(
         limit: maximum number of results to return (capped at 100).
         offset: pagination offset.
     """
-    from company.api import SupplierPartList
-
     base: dict[str, Any] = {}
     if part is not None:
         base["part"] = part
@@ -149,7 +144,10 @@ async def list_supplier_parts(
     params = build_query_params(base, filters, limit, offset)
 
     return await call_view(
-        SupplierPartList, "GET", "/api/company/part/", query_params=params
+        resolve_view("company.api", "SupplierPartList"),
+        "GET",
+        "/api/company/part/",
+        query_params=params,
     )
 
 
@@ -173,10 +171,8 @@ async def get_supplier_part(
         ToolError: no supplier part exists with that ID, or the caller
             doesn't have permission to view it.
     """
-    from company.api import SupplierPartDetail
-
     return await call_view(
-        SupplierPartDetail,
+        resolve_view("company.api", "SupplierPartDetail"),
         "GET",
         f"/api/company/part/{supplier_part_id}/",
         pk=supplier_part_id,

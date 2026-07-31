@@ -6,6 +6,7 @@ from typing import Any
 
 from ..mcp_server import mcp
 from ..proxy import call_view
+from ..view_resolution import resolve_view
 from ._common import build_query_params
 
 
@@ -43,8 +44,6 @@ async def list_locations(
         limit: maximum number of results to return (capped at 100).
         offset: pagination offset.
     """
-    from stock.api import StockLocationList
-
     base: dict[str, Any] = {}
     if search is not None:
         base["search"] = search
@@ -56,7 +55,10 @@ async def list_locations(
     params = build_query_params(base, filters, limit, offset)
 
     return await call_view(
-        StockLocationList, "GET", "/api/stock/location/", query_params=params
+        resolve_view("stock.api", "StockLocationList"),
+        "GET",
+        "/api/stock/location/",
+        query_params=params,
     )
 
 
@@ -77,10 +79,8 @@ async def get_location(location_id: int, filters: dict[str, Any] | None = None) 
         ToolError: no location exists with that ID, or the caller doesn't
             have permission to view it.
     """
-    from stock.api import StockLocationDetail
-
     return await call_view(
-        StockLocationDetail,
+        resolve_view("stock.api", "StockLocationDetail"),
         "GET",
         f"/api/stock/location/{location_id}/",
         pk=location_id,

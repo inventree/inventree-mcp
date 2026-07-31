@@ -141,7 +141,9 @@ async def visible_tool_names(names: Iterable[str]) -> set[str]:
 
         if resource not in resource_access:
             view_cls = RESOURCE_LOADERS[resource]()
-            resource_access[resource] = await proxy.user_has_access(view_cls, "GET")
+            resource_access[resource] = view_cls is not None and (
+                await proxy.user_has_access(view_cls, "GET")
+            )
 
         if resource_access[resource]:
             visible.add(name)
