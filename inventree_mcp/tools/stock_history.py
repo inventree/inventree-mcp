@@ -14,6 +14,7 @@ from typing import Any
 
 from ..mcp_server import mcp
 from ..proxy import call_view
+from ..view_resolution import resolve_view
 from ._common import build_query_params
 
 
@@ -58,8 +59,6 @@ async def list_stock_tracking(
         limit: maximum number of results to return (capped at 100).
         offset: pagination offset.
     """
-    from stock.api import StockTrackingList
-
     base: dict[str, Any] = {}
     if item is not None:
         base["item"] = item
@@ -73,7 +72,10 @@ async def list_stock_tracking(
     params = build_query_params(base, filters, limit, offset)
 
     return await call_view(
-        StockTrackingList, "GET", "/api/stock/track/", query_params=params
+        resolve_view("stock.api", "StockTrackingList"),
+        "GET",
+        "/api/stock/track/",
+        query_params=params,
     )
 
 
@@ -97,10 +99,8 @@ async def get_stock_tracking(
         ToolError: no tracking entry exists with that ID, or the caller
             doesn't have permission to view it.
     """
-    from stock.api import StockTrackingDetail
-
     return await call_view(
-        StockTrackingDetail,
+        resolve_view("stock.api", "StockTrackingDetail"),
         "GET",
         f"/api/stock/track/{tracking_id}/",
         pk=tracking_id,
@@ -149,8 +149,6 @@ async def list_stock_test_results(
         limit: maximum number of results to return (capped at 100).
         offset: pagination offset.
     """
-    from stock.api import StockItemTestResultList
-
     base: dict[str, Any] = {}
     if stock_item is not None:
         base["stock_item"] = stock_item
@@ -164,7 +162,10 @@ async def list_stock_test_results(
     params = build_query_params(base, filters, limit, offset)
 
     return await call_view(
-        StockItemTestResultList, "GET", "/api/stock/test/", query_params=params
+        resolve_view("stock.api", "StockItemTestResultList"),
+        "GET",
+        "/api/stock/test/",
+        query_params=params,
     )
 
 
@@ -188,10 +189,8 @@ async def get_stock_test_result(
         ToolError: no test result exists with that ID, or the caller
             doesn't have permission to view it.
     """
-    from stock.api import StockItemTestResultDetail
-
     return await call_view(
-        StockItemTestResultDetail,
+        resolve_view("stock.api", "StockItemTestResultDetail"),
         "GET",
         f"/api/stock/test/{result_id}/",
         pk=result_id,

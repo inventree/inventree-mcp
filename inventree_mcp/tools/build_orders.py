@@ -6,6 +6,7 @@ from typing import Any
 
 from ..mcp_server import mcp
 from ..proxy import call_view
+from ..view_resolution import resolve_view
 from ._common import build_query_params
 
 
@@ -48,8 +49,6 @@ async def list_build_orders(
         limit: maximum number of results to return (capped at 100).
         offset: pagination offset.
     """
-    from build.api import BuildList
-
     base: dict[str, Any] = {}
     if part is not None:
         base["part"] = part
@@ -62,7 +61,12 @@ async def list_build_orders(
 
     params = build_query_params(base, filters, limit, offset)
 
-    return await call_view(BuildList, "GET", "/api/build/", query_params=params)
+    return await call_view(
+        resolve_view("build.api", "BuildList"),
+        "GET",
+        "/api/build/",
+        query_params=params,
+    )
 
 
 @mcp.tool()
@@ -86,10 +90,12 @@ async def get_build_order(build_id: int, filters: dict[str, Any] | None = None) 
         ToolError: no build order exists with that ID, or the caller
             doesn't have permission to view it.
     """
-    from build.api import BuildDetail
-
     return await call_view(
-        BuildDetail, "GET", f"/api/build/{build_id}/", pk=build_id, query_params=filters
+        resolve_view("build.api", "BuildDetail"),
+        "GET",
+        f"/api/build/{build_id}/",
+        pk=build_id,
+        query_params=filters,
     )
 
 
@@ -129,8 +135,6 @@ async def list_build_lines(
         limit: maximum number of results to return (capped at 100).
         offset: pagination offset.
     """
-    from build.api import BuildLineList
-
     base: dict[str, Any] = {}
     if build is not None:
         base["build"] = build
@@ -140,7 +144,10 @@ async def list_build_lines(
     params = build_query_params(base, filters, limit, offset)
 
     return await call_view(
-        BuildLineList, "GET", "/api/build/line/", query_params=params
+        resolve_view("build.api", "BuildLineList"),
+        "GET",
+        "/api/build/line/",
+        query_params=params,
     )
 
 
@@ -161,10 +168,8 @@ async def get_build_line(line_id: int, filters: dict[str, Any] | None = None) ->
         ToolError: no build line exists with that ID, or the caller
             doesn't have permission to view it.
     """
-    from build.api import BuildLineDetail
-
     return await call_view(
-        BuildLineDetail,
+        resolve_view("build.api", "BuildLineDetail"),
         "GET",
         f"/api/build/line/{line_id}/",
         pk=line_id,
@@ -209,8 +214,6 @@ async def list_build_items(
         limit: maximum number of results to return (capped at 100).
         offset: pagination offset.
     """
-    from build.api import BuildItemList
-
     base: dict[str, Any] = {}
     if build is not None:
         base["build"] = build
@@ -222,7 +225,10 @@ async def list_build_items(
     params = build_query_params(base, filters, limit, offset)
 
     return await call_view(
-        BuildItemList, "GET", "/api/build/item/", query_params=params
+        resolve_view("build.api", "BuildItemList"),
+        "GET",
+        "/api/build/item/",
+        query_params=params,
     )
 
 
@@ -243,10 +249,8 @@ async def get_build_item(item_id: int, filters: dict[str, Any] | None = None) ->
         ToolError: no allocation exists with that ID, or the caller doesn't
             have permission to view it.
     """
-    from build.api import BuildItemDetail
-
     return await call_view(
-        BuildItemDetail,
+        resolve_view("build.api", "BuildItemDetail"),
         "GET",
         f"/api/build/item/{item_id}/",
         pk=item_id,

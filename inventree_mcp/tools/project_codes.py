@@ -14,6 +14,7 @@ from typing import Any
 
 from ..mcp_server import mcp
 from ..proxy import call_view
+from ..view_resolution import resolve_view
 from ._common import build_query_params
 
 
@@ -46,8 +47,6 @@ async def list_project_codes(
         limit: maximum number of results to return (capped at 100).
         offset: pagination offset.
     """
-    from common.api import ProjectCodeList
-
     base: dict[str, Any] = {}
     if search is not None:
         base["search"] = search
@@ -57,7 +56,10 @@ async def list_project_codes(
     params = build_query_params(base, filters, limit, offset)
 
     return await call_view(
-        ProjectCodeList, "GET", "/api/project-code/", query_params=params
+        resolve_view("common.api", "ProjectCodeList"),
+        "GET",
+        "/api/project-code/",
+        query_params=params,
     )
 
 
@@ -81,10 +83,8 @@ async def get_project_code(
         ToolError: no project code exists with that ID, or the caller
             doesn't have permission to view it.
     """
-    from common.api import ProjectCodeDetail
-
     return await call_view(
-        ProjectCodeDetail,
+        resolve_view("common.api", "ProjectCodeDetail"),
         "GET",
         f"/api/project-code/{project_code_id}/",
         pk=project_code_id,

@@ -17,6 +17,7 @@ from typing import Any
 
 from ..mcp_server import mcp
 from ..proxy import call_view
+from ..view_resolution import resolve_view
 from ._common import build_query_params
 
 
@@ -74,8 +75,6 @@ async def list_parameters(
         limit: maximum number of results to return (capped at 100).
         offset: pagination offset.
     """
-    from common.api import ParameterList
-
     base: dict[str, Any] = {}
     if model_type is not None:
         base["model_type"] = model_type
@@ -88,7 +87,12 @@ async def list_parameters(
 
     params = build_query_params(base, filters, limit, offset)
 
-    return await call_view(ParameterList, "GET", "/api/parameter/", query_params=params)
+    return await call_view(
+        resolve_view("common.api", "ParameterList"),
+        "GET",
+        "/api/parameter/",
+        query_params=params,
+    )
 
 
 @mcp.tool()
@@ -110,10 +114,8 @@ async def get_parameter(
         ToolError: no parameter exists with that ID, or the caller doesn't
             have permission to view it.
     """
-    from common.api import ParameterDetail
-
     return await call_view(
-        ParameterDetail,
+        resolve_view("common.api", "ParameterDetail"),
         "GET",
         f"/api/parameter/{parameter_id}/",
         pk=parameter_id,
@@ -155,8 +157,6 @@ async def list_parameter_templates(
         limit: maximum number of results to return (capped at 100).
         offset: pagination offset.
     """
-    from common.api import ParameterTemplateList
-
     base: dict[str, Any] = {}
     if search is not None:
         base["search"] = search
@@ -166,7 +166,10 @@ async def list_parameter_templates(
     params = build_query_params(base, filters, limit, offset)
 
     return await call_view(
-        ParameterTemplateList, "GET", "/api/parameter/template/", query_params=params
+        resolve_view("common.api", "ParameterTemplateList"),
+        "GET",
+        "/api/parameter/template/",
+        query_params=params,
     )
 
 
@@ -190,10 +193,8 @@ async def get_parameter_template(
         ToolError: no parameter template exists with that ID, or the caller
             doesn't have permission to view it.
     """
-    from common.api import ParameterTemplateDetail
-
     return await call_view(
-        ParameterTemplateDetail,
+        resolve_view("common.api", "ParameterTemplateDetail"),
         "GET",
         f"/api/parameter/template/{template_id}/",
         pk=template_id,

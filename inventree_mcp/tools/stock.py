@@ -6,6 +6,7 @@ from typing import Any
 
 from ..mcp_server import mcp
 from ..proxy import call_view
+from ..view_resolution import resolve_view
 from ._common import build_query_params
 
 
@@ -47,8 +48,6 @@ async def list_stock_items(
         limit: maximum number of results to return (capped at 100).
         offset: pagination offset.
     """
-    from stock.api import StockList
-
     base: dict[str, Any] = {}
     if part is not None:
         base["part"] = part
@@ -61,7 +60,12 @@ async def list_stock_items(
 
     params = build_query_params(base, filters, limit, offset)
 
-    return await call_view(StockList, "GET", "/api/stock/", query_params=params)
+    return await call_view(
+        resolve_view("stock.api", "StockList"),
+        "GET",
+        "/api/stock/",
+        query_params=params,
+    )
 
 
 @mcp.tool()
@@ -84,10 +88,8 @@ async def get_stock_item(
         ToolError: no stock item exists with that ID, or the caller doesn't
             have permission to view it.
     """
-    from stock.api import StockDetail
-
     return await call_view(
-        StockDetail,
+        resolve_view("stock.api", "StockDetail"),
         "GET",
         f"/api/stock/{stock_item_id}/",
         pk=stock_item_id,

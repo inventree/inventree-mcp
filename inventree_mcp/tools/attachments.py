@@ -14,6 +14,7 @@ from typing import Any
 
 from ..mcp_server import mcp
 from ..proxy import call_view
+from ..view_resolution import resolve_view
 from ._common import build_query_params
 
 
@@ -68,8 +69,6 @@ async def list_attachments(
         limit: maximum number of results to return (capped at 100).
         offset: pagination offset.
     """
-    from common.api import AttachmentList
-
     base: dict[str, Any] = {}
     if model_type is not None:
         base["model_type"] = model_type
@@ -83,7 +82,10 @@ async def list_attachments(
     params = build_query_params(base, filters, limit, offset)
 
     return await call_view(
-        AttachmentList, "GET", "/api/attachment/", query_params=params
+        resolve_view("common.api", "AttachmentList"),
+        "GET",
+        "/api/attachment/",
+        query_params=params,
     )
 
 
@@ -106,10 +108,8 @@ async def get_attachment(
         ToolError: no attachment exists with that ID, or the caller doesn't
             have permission to view it.
     """
-    from common.api import AttachmentDetail
-
     return await call_view(
-        AttachmentDetail,
+        resolve_view("common.api", "AttachmentDetail"),
         "GET",
         f"/api/attachment/{attachment_id}/",
         pk=attachment_id,

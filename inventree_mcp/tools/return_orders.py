@@ -12,6 +12,7 @@ from typing import Any
 
 from ..mcp_server import mcp
 from ..proxy import call_view
+from ..view_resolution import resolve_view
 from ._common import build_query_params
 
 
@@ -53,8 +54,6 @@ async def list_return_orders(
         limit: maximum number of results to return (capped at 100).
         offset: pagination offset.
     """
-    from order.api import ReturnOrderList
-
     base: dict[str, Any] = {}
     if customer is not None:
         base["customer"] = customer
@@ -68,7 +67,10 @@ async def list_return_orders(
     params = build_query_params(base, filters, limit, offset)
 
     return await call_view(
-        ReturnOrderList, "GET", "/api/order/ro/", query_params=params
+        resolve_view("order.api", "ReturnOrderList"),
+        "GET",
+        "/api/order/ro/",
+        query_params=params,
     )
 
 
@@ -93,10 +95,8 @@ async def get_return_order(
         ToolError: no return order exists with that ID, or the caller
             doesn't have permission to view it.
     """
-    from order.api import ReturnOrderDetail
-
     return await call_view(
-        ReturnOrderDetail,
+        resolve_view("order.api", "ReturnOrderDetail"),
         "GET",
         f"/api/order/ro/{order_id}/",
         pk=order_id,
@@ -139,8 +139,6 @@ async def list_return_order_lines(
         limit: maximum number of results to return (capped at 100).
         offset: pagination offset.
     """
-    from order.api import ReturnOrderLineItemList
-
     base: dict[str, Any] = {}
     if order is not None:
         base["order"] = order
@@ -154,7 +152,10 @@ async def list_return_order_lines(
     params = build_query_params(base, filters, limit, offset)
 
     return await call_view(
-        ReturnOrderLineItemList, "GET", "/api/order/ro-line/", query_params=params
+        resolve_view("order.api", "ReturnOrderLineItemList"),
+        "GET",
+        "/api/order/ro-line/",
+        query_params=params,
     )
 
 
@@ -178,10 +179,8 @@ async def get_return_order_line(
         ToolError: no line item exists with that ID, or the caller doesn't
             have permission to view it.
     """
-    from order.api import ReturnOrderLineItemDetail
-
     return await call_view(
-        ReturnOrderLineItemDetail,
+        resolve_view("order.api", "ReturnOrderLineItemDetail"),
         "GET",
         f"/api/order/ro-line/{line_id}/",
         pk=line_id,

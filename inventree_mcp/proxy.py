@@ -165,7 +165,7 @@ async def user_has_access(view_cls: type[APIView], method: str = "GET") -> bool:
 
 
 async def call_view(
-    view_cls: type[APIView],
+    view_cls: type[APIView] | None,
     method: str,
     path: str,
     *,
@@ -176,7 +176,10 @@ async def call_view(
     """Invoke an existing InvenTree DRF view class as the current MCP user.
 
     Args:
-        view_cls: the view class as used in the real API urlconf (e.g. part.api.PartList).
+        view_cls: the view class as used in the real API urlconf (e.g.
+            part.api.PartList), or None if view_resolution.resolve_view()
+            couldn't import it (a version mismatch between this plugin and
+            the running InvenTree core - see that module's docstring).
         method: HTTP method to simulate ('GET', 'POST', 'PATCH', ...).
         path: the API path being emulated (only used for logging/routing context, not resolved).
         query_params: query string parameters (GET requests).
@@ -188,9 +191,10 @@ async def call_view(
 
     Raises:
         ToolError: the underlying API call did not succeed (permission denied,
-            not found, validation error, ...), or method is not GET while the
-            plugin's MCP_READ_ONLY setting is enabled (the default). The
-            message is safe to surface to the calling agent.
+            not found, validation error, ...), method is not GET while the
+            plugin's MCP_READ_ONLY setting is enabled (the default), or
+            view_cls is None. The message is safe to surface to the calling
+            agent.
 
     Note:
         MCPServer calls tool functions directly in the request's event loop, and
@@ -204,6 +208,19 @@ async def call_view(
         open (breaking Django TestCase's per-test transaction, and able to
         deadlock against it under Postgres).
     """
+    if view_cls is None:
+        # Checked here rather than left to _call_view_sync (no ORM/IO
+        # involved, so no need for the sync_to_async hop) - every tool body
+        # reaches this through resolve_view(), so this is the one place a
+        # missing endpoint turns into the same clean ToolError a real
+        # permission or validation failure would give the caller, instead of
+        # each of the ~50 call sites needing its own None check.
+        raise ToolError(
+            "This tool is unavailable: its underlying InvenTree API endpoint "
+            "could not be found. This usually means the InvenTree MCP "
+            "plugin doesn't match the running InvenTree core version."
+        )
+
     return await sync_to_async(_call_view_sync)(
         view_cls,
         method,

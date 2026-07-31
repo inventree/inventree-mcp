@@ -6,6 +6,7 @@ from typing import Any
 
 from ..mcp_server import mcp
 from ..proxy import call_view
+from ..view_resolution import resolve_view
 from ._common import build_query_params
 
 
@@ -49,8 +50,6 @@ async def list_companies(
         limit: maximum number of results to return (capped at 100).
         offset: pagination offset.
     """
-    from company.api import CompanyList
-
     base: dict[str, Any] = {}
     if search is not None:
         base["search"] = search
@@ -67,7 +66,12 @@ async def list_companies(
 
     params = build_query_params(base, filters, limit, offset)
 
-    return await call_view(CompanyList, "GET", "/api/company/", query_params=params)
+    return await call_view(
+        resolve_view("company.api", "CompanyList"),
+        "GET",
+        "/api/company/",
+        query_params=params,
+    )
 
 
 @mcp.tool()
@@ -88,10 +92,8 @@ async def get_company(company_id: int, filters: dict[str, Any] | None = None) ->
         ToolError: no company exists with that ID, or the caller doesn't
             have permission to view it.
     """
-    from company.api import CompanyDetail
-
     return await call_view(
-        CompanyDetail,
+        resolve_view("company.api", "CompanyDetail"),
         "GET",
         f"/api/company/{company_id}/",
         pk=company_id,
@@ -126,8 +128,6 @@ async def list_contacts(
         limit: maximum number of results to return (capped at 100).
         offset: pagination offset.
     """
-    from company.api import ContactList
-
     base: dict[str, Any] = {}
     if company is not None:
         base["company"] = company
@@ -137,7 +137,10 @@ async def list_contacts(
     params = build_query_params(base, filters, limit, offset)
 
     return await call_view(
-        ContactList, "GET", "/api/company/contact/", query_params=params
+        resolve_view("company.api", "ContactList"),
+        "GET",
+        "/api/company/contact/",
+        query_params=params,
     )
 
 
@@ -158,10 +161,8 @@ async def get_contact(contact_id: int, filters: dict[str, Any] | None = None) ->
         ToolError: no contact exists with that ID, or the caller doesn't
             have permission to view it.
     """
-    from company.api import ContactDetail
-
     return await call_view(
-        ContactDetail,
+        resolve_view("company.api", "ContactDetail"),
         "GET",
         f"/api/company/contact/{contact_id}/",
         pk=contact_id,
@@ -196,8 +197,6 @@ async def list_addresses(
         limit: maximum number of results to return (capped at 100).
         offset: pagination offset.
     """
-    from company.api import AddressList
-
     base: dict[str, Any] = {}
     if company is not None:
         base["company"] = company
@@ -207,7 +206,10 @@ async def list_addresses(
     params = build_query_params(base, filters, limit, offset)
 
     return await call_view(
-        AddressList, "GET", "/api/company/address/", query_params=params
+        resolve_view("company.api", "AddressList"),
+        "GET",
+        "/api/company/address/",
+        query_params=params,
     )
 
 
@@ -228,10 +230,8 @@ async def get_address(address_id: int, filters: dict[str, Any] | None = None) ->
         ToolError: no address exists with that ID, or the caller doesn't
             have permission to view it.
     """
-    from company.api import AddressDetail
-
     return await call_view(
-        AddressDetail,
+        resolve_view("company.api", "AddressDetail"),
         "GET",
         f"/api/company/address/{address_id}/",
         pk=address_id,

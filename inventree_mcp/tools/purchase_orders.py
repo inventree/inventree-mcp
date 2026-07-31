@@ -6,6 +6,7 @@ from typing import Any
 
 from ..mcp_server import mcp
 from ..proxy import call_view
+from ..view_resolution import resolve_view
 from ._common import build_query_params
 
 
@@ -48,8 +49,6 @@ async def list_purchase_orders(
         limit: maximum number of results to return (capped at 100).
         offset: pagination offset.
     """
-    from order.api import PurchaseOrderList
-
     base: dict[str, Any] = {}
     if supplier is not None:
         base["supplier"] = supplier
@@ -63,7 +62,10 @@ async def list_purchase_orders(
     params = build_query_params(base, filters, limit, offset)
 
     return await call_view(
-        PurchaseOrderList, "GET", "/api/order/po/", query_params=params
+        resolve_view("order.api", "PurchaseOrderList"),
+        "GET",
+        "/api/order/po/",
+        query_params=params,
     )
 
 
@@ -88,10 +90,8 @@ async def get_purchase_order(
         ToolError: no purchase order exists with that ID, or the caller
             doesn't have permission to view it.
     """
-    from order.api import PurchaseOrderDetail
-
     return await call_view(
-        PurchaseOrderDetail,
+        resolve_view("order.api", "PurchaseOrderDetail"),
         "GET",
         f"/api/order/po/{order_id}/",
         pk=order_id,
@@ -136,8 +136,6 @@ async def list_purchase_order_lines(
         limit: maximum number of results to return (capped at 100).
         offset: pagination offset.
     """
-    from order.api import PurchaseOrderLineItemList
-
     base: dict[str, Any] = {}
     if order is not None:
         base["order"] = order
@@ -151,7 +149,10 @@ async def list_purchase_order_lines(
     params = build_query_params(base, filters, limit, offset)
 
     return await call_view(
-        PurchaseOrderLineItemList, "GET", "/api/order/po-line/", query_params=params
+        resolve_view("order.api", "PurchaseOrderLineItemList"),
+        "GET",
+        "/api/order/po-line/",
+        query_params=params,
     )
 
 
@@ -175,10 +176,8 @@ async def get_purchase_order_line(
         ToolError: no line item exists with that ID, or the caller doesn't
             have permission to view it.
     """
-    from order.api import PurchaseOrderLineItemDetail
-
     return await call_view(
-        PurchaseOrderLineItemDetail,
+        resolve_view("order.api", "PurchaseOrderLineItemDetail"),
         "GET",
         f"/api/order/po-line/{line_id}/",
         pk=line_id,
