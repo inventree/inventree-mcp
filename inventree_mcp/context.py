@@ -45,13 +45,33 @@ def reset_current_user(token: Token) -> None:
     _current_identity.reset(token)
 
 
-def has_current_user() -> bool:
-    """Return whether a user is currently bound, without raising if not.
+def has_bound_identity() -> bool:
+    """Return whether set_current_user() has been called in this context at all.
 
-    For code that needs to behave differently outside a real MCP request
-    (e.g. tool_visibility.py, which can't run a permission check without a
-    caller to check permissions *for*) rather than treat "no caller" as a
-    fatal error the way get_current_user() deliberately does everywhere else.
+    True for *any* real MCP request - including one that resolved to an
+    unauthenticated (AnonymousUser) identity, e.g. REQUIRE_AUTH disabled and
+    no credentials were sent. False only outside a real request (e.g. static
+    introspection - see has_current_user()'s docstring). Distinct from
+    has_current_user(): that answers "is there someone to check permissions
+    for", this answers "did a request happen at all" - callers that need to
+    tell "no request" (safe to skip filtering) apart from "a request with no
+    authenticated user" (should filter down to nothing, not everything) need
+    this one, not has_current_user().
+    """
+    return _current_identity.get() is not None
+
+
+def has_current_user() -> bool:
+    """Return whether an *authenticated* user is currently bound.
+
+    False both outside a real MCP request (see has_bound_identity() to tell
+    that case apart) and for a real request that resolved to an
+    unauthenticated (AnonymousUser) identity - callers that only need "is
+    there someone to check permissions for" (e.g. tool_logging.py's caller
+    label) can treat both the same way; callers that need to react
+    differently to the two (e.g. tool_visibility.py, which must not show
+    every tool just because this request happened to be unauthenticated)
+    should check has_bound_identity() first.
     """
     identity = _current_identity.get()
     return identity is not None and identity.user.is_authenticated

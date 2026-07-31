@@ -23,6 +23,7 @@ from common.models import Attachment, Parameter, ParameterTemplate, ProjectCode
 from common.serializers import ProjectCodeSerializer
 from company.models import Address, Company, Contact, ManufacturerPart, SupplierPart
 from django.contrib.auth import get_user_model
+from django.contrib.auth.models import AnonymousUser
 from django.contrib.contenttypes.models import ContentType
 from django.test import Client, override_settings
 from django.utils import timezone
@@ -1215,6 +1216,26 @@ class ToolVisibilityTest(InvenTreeTestCase):
         names = await tool_visibility.visible_tool_names(all_names)
 
         self.assertEqual(names, all_names)
+
+    async def test_unauthenticated_bound_identity_sees_only_tools_needing_no_auth(self):
+        """A real request that resolved to an unauthenticated identity (e.g.
+        REQUIRE_AUTH disabled and no credentials sent) is a real caller, not
+        "no request" - unlike the unfiltered case above, it must be filtered
+        down to only the tools with no underlying view at all
+        (describe_filters). Even the tools that need no specific *role*
+        (list_attachments, list_parameters, list_project_codes, ...) still
+        require *some* authenticated user via call_view(), so an
+        unauthenticated identity must not see them either - regression test
+        for context.has_bound_identity() vs has_current_user().
+        """
+        context.set_current_user(AnonymousUser())
+        self.addCleanup(context.set_current_user, None)
+
+        names = await tool_visibility.visible_tool_names(
+            tool.name for tool in await mcp.list_tools()
+        )
+
+        self.assertEqual(names, {"describe_filters"})
 
     async def test_unavailable_resource_hides_its_tools_without_crashing(self):
         """A resource whose loader can't resolve its view class (e.g. a

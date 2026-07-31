@@ -41,7 +41,7 @@ from typing import TYPE_CHECKING
 from mcp.types import ListToolsResult, PaginatedRequestParams
 
 from . import proxy
-from .context import has_current_user
+from .context import has_bound_identity
 from .mcp_server import mcp
 from .tools.discovery import RESOURCE_LOADERS
 
@@ -121,13 +121,26 @@ async def visible_tool_names(names: Iterable[str]) -> set[str]:
     """Return the subset of *names* the current bound user can actually call.
 
     A tool with no entry in _TOOL_RESOURCES (e.g. describe_filters) is
-    always included. If no user is bound at all (e.g. static introspection
-    outside a real MCP request - see OutputSchemaTest in test_mcp.py, which
-    calls mcp.list_tools() directly without binding one), every name is
+    always included - it has no underlying view to check a permission
+    against, so this holds even for an unauthenticated caller (see below).
+    If there's no request at all (e.g. static introspection outside a real
+    MCP request - see OutputSchemaTest in test_mcp.py, which calls
+    mcp.list_tools() directly without binding an identity), every name is
     returned unfiltered, since there's no caller to filter *by* - this is
     not a real request path, so there's nothing unsafe about it.
+
+    A real request that resolved to an unauthenticated identity (e.g.
+    REQUIRE_AUTH disabled and no credentials were sent) is deliberately
+    *not* treated the same as "no request" above - has_bound_identity()
+    (not has_current_user()) gates the unfiltered fallback, so this case
+    falls through into the per-tool loop below instead. Every gated tool
+    then correctly resolves to "not visible" (proxy.user_has_access()
+    catches get_current_user()'s PermissionError for an unauthenticated
+    caller and returns False), leaving only the tools with no underlying
+    view at all visible - not the "no *role* required, but still needs to
+    be someone" tools like list_attachments.
     """
-    if not has_current_user():
+    if not has_bound_identity():
         return set(names)
 
     visible: set[str] = set()
