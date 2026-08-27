@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import datetime
 import json
+import sys
 import unittest
 from typing import Any, ClassVar
 from unittest.mock import patch
@@ -59,6 +60,7 @@ from .mcp_server import mcp
 from .proxy import call_view
 from .schema_introspection import paginated_schema, serializer_schema
 from .settings import get_plugin_setting
+from .tools import discovery
 from .tools._common import DEFAULT_LIMIT, MAX_LIMIT, build_query_params, clamp_limit
 from .tools.attachments import get_attachment, list_attachments
 from .tools.bom import (
@@ -84,7 +86,7 @@ from .tools.companies import (
     list_companies,
     list_contacts,
 )
-from .tools.discovery import RESOURCE_LOADERS, describe_filters
+from .tools.discovery import RESOURCE_LOADERS, describe_filters, make_web_link
 from .tools.locations import get_location, list_locations
 from .tools.parameters import (
     get_parameter,
@@ -1081,6 +1083,22 @@ class MCPToolPermissionTest(InvenTreeTestCase):
         detail = await get_project_code(self.project_code.pk)
         self.assertEqual(detail["pk"], self.project_code.pk)
 
+    async def test_make_web_link_builds_a_real_url_end_to_end(self):
+        """Exercise the actual registered async tool (not just the sync helper
+        MakeWebLinkTest covers) - confirms the sync_to_async wrapping in
+        discovery.make_web_link() doesn't swallow or mis-route either the
+        return value or a raised ToolError.
+        """
+        result = await make_web_link("purchase_order", self.purchase_order.pk)
+        self.assertTrue(
+            result["web_url"].endswith(
+                f"/web/purchasing/purchase-order/{self.purchase_order.pk}"
+            )
+        )
+
+        with self.assertRaises(ToolError):
+            await make_web_link("purchase_order_line", self.po_line.pk)
+
     async def test_tools_list_reflects_oauth2_scope_narrowing(self):
         """Regression test for a real design bug caught during development, not a
         hypothetical: a literal HTTP OPTIONS-based capability check (the obvious
@@ -1162,6 +1180,7 @@ class ToolVisibilityTest(InvenTreeTestCase):
             names,
             {
                 "describe_filters",
+                "make_web_link",
                 "list_attachments",
                 "get_attachment",
                 "list_parameters",
@@ -1241,7 +1260,7 @@ class ToolVisibilityTest(InvenTreeTestCase):
             tool.name for tool in await mcp.list_tools()
         )
 
-        self.assertEqual(names, {"describe_filters"})
+        self.assertEqual(names, {"describe_filters", "make_web_link"})
 
     async def test_unavailable_resource_hides_its_tools_without_crashing(self):
         """A resource whose loader can't resolve its view class (e.g. a
@@ -1273,7 +1292,14 @@ class ToolVisibilityTest(InvenTreeTestCase):
         """
         all_names = {tool.name for tool in await mcp.list_tools()}
         unmapped = (
-            all_names - set(tool_visibility._TOOL_RESOURCES) - {"describe_filters"}
+            all_names
+            - set(tool_visibility._TOOL_RESOURCES)
+            # Both pure metadata/utility tools with no underlying gated view:
+            # describe_filters only reads static filterset/serializer
+            # definitions, make_web_link only builds a URL string - neither
+            # touches the database in a way any RolePermission/RuleSet check
+            # applies to.
+            - {"describe_filters", "make_web_link"}
         )
 
         self.assertEqual(unmapped, set())
@@ -1374,6 +1400,65 @@ class ResolveViewAnyTest(unittest.TestCase):
             )
 
         mock_import.assert_called_once()
+
+
+class MakeWebLinkTest(unittest.TestCase):
+    """discovery._build_web_link() must build the right InvenTree web-UI URL, and know when not to.
+
+    Exercises the sync helper directly rather than the registered async
+    make_web_link() tool - same reasoning as ViewResolutionTest testing
+    resolve_view() directly: this needs no MCP/DB fixtures, just the plain
+    function ToolError.
+    """
+
+    def test_raises_for_a_resource_with_no_standalone_page(self):
+        with self.assertRaises(ToolError):
+            discovery._build_web_link("purchase_order_line", 1)
+
+    def test_returns_an_error_message_without_a_configured_base_url(self):
+        with patch("InvenTree.helpers_model.get_base_url", return_value=""):
+            result = discovery._build_web_link("part", 5)
+            self.assertIsNone(result["web_url"])
+            self.assertIn("error", result)
+
+    def test_returns_an_error_message_on_a_core_version_mismatch(self):
+        # Setting a module to None in sys.modules is what actually forces
+        # ImportError out of a `from X import Y` statement - patching an
+        # attribute on the already-imported module (as
+        # test_returns_an_error_message_without_a_configured_base_url does
+        # above) can't simulate that, since the `from` import itself would
+        # still succeed.
+        with patch.dict(sys.modules, {"InvenTree.helpers": None}):
+            result = discovery._build_web_link("part", 5)
+            self.assertIsNone(result["web_url"])
+            self.assertIn("error", result)
+
+    def test_builds_the_expected_url_per_resource(self):
+        with patch("InvenTree.helpers_model.get_base_url", return_value="http://x/"):
+            cases = {
+                "part": (5, "http://x/web/part/5"),
+                "category": (2, "http://x/web/part/category/2"),
+                "stock": (7, "http://x/web/stock/item/7"),
+                "location": (3, "http://x/web/stock/location/3"),
+                "purchase_order": (9, "http://x/web/purchasing/purchase-order/9"),
+                "supplier_part": (4, "http://x/web/purchasing/supplier-part/4"),
+                "manufacturer_part": (
+                    6,
+                    "http://x/web/purchasing/manufacturer-part/6",
+                ),
+                # The generic 'company/{pk}' route, not core's own Company.
+                # get_absolute_url() - see _WEB_LINK_PATHS's comment for why.
+                "company": (8, "http://x/web/company/8"),
+                "sales_order": (1, "http://x/web/sales/sales-order/1"),
+                "return_order": (10, "http://x/web/sales/return-order/10"),
+                "build_order": (11, "http://x/web/manufacturing/build-order/11"),
+            }
+            for resource, (pk, expected) in cases.items():
+                self.assertEqual(
+                    discovery._build_web_link(resource, pk)["web_url"],
+                    expected,
+                    resource,
+                )
 
 
 class CallViewImportSafetyTest(InvenTreeTestCase):
