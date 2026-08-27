@@ -847,24 +847,30 @@ class MCPToolPermissionTest(InvenTreeTestCase):
         images_only = await list_attachments(is_image=True)
         self.assertNotIn(self.attachment.pk, [a["pk"] for a in images_only["results"]])
 
-    async def test_unauthorized_user_can_still_read_attachments(self):
-        """Deliberately the opposite assertion from every other resource's denial test.
+    async def test_unauthorized_user_cannot_read_attachments(self):
+        """Attachment reads are gated by the *linked* model's own view permission.
 
-        AttachmentList/Detail have no RolePermission/RuleSet gate on reads -
-        only IsAuthenticatedOrReadScope (any authenticated user) - see
-        tools/attachments.py's module docstring. A zero-role user must still
-        succeed here; asserting ToolError (the pattern used everywhere else
-        in this file) would be testing for the wrong thing and would mask a
-        real regression if this view's permissions ever tightened.
+        InvenTree core commit 528bb085d7 ("User permissions check for
+        Attachment API (#12689)") closed a prior gap where Attachment reads
+        had no RuleSet check at all - AttachmentList.get_queryset() now
+        filters to model_types the user can view (get_viewable_attachment_
+        model_types() in common/api.py), and AttachmentDetail.retrieve()
+        checks the specific object's permission directly. The Attachment
+        *view* itself still only requires IsAuthenticatedOrReadScope (any
+        authenticated user), so unlike every other gated resource's list
+        tool, list_attachments doesn't raise ToolError for a zero-role user
+        - it succeeds (200) with the inaccessible attachment filtered out of
+        the results instead. Only get_attachment raises, since that's where
+        the per-object permission check lives.
         """
         self._as(self.no_access_user)
 
         listed = await list_attachments(model_type="part", model_id=self.part.pk)
         ids = [a["pk"] for a in listed["results"]]
-        self.assertIn(self.attachment.pk, ids)
+        self.assertNotIn(self.attachment.pk, ids)
 
-        detail = await get_attachment(self.attachment.pk)
-        self.assertEqual(detail["pk"], self.attachment.pk)
+        with self.assertRaises(ToolError):
+            await get_attachment(self.attachment.pk)
 
     async def test_authorized_user_can_list_and_get_parameters(self):
         self._as(self.user)
@@ -1306,6 +1312,66 @@ class ViewResolutionTest(unittest.TestCase):
         ) as mock_import:
             self.assertIsNone(view_resolution.resolve_view("some.fake.module", "X"))
             self.assertIsNone(view_resolution.resolve_view("some.fake.module", "X"))
+
+        mock_import.assert_called_once()
+
+
+class ResolveViewAnyTest(unittest.TestCase):
+    """resolve_view_any() must fall back across a renamed-between-core-versions class.
+
+    Covers the PurchaseOrderList/PurchaseOrderDetail ('stable') vs
+    PurchaseOrderViewSet ('master', core PR #12317) case - tools/*.py can't
+    hardcode either name alone without breaking on the other core version.
+    """
+
+    def setUp(self):
+        super().setUp()
+        # Same isolation reasoning as ViewResolutionTest.setUp - this cache
+        # persists for the life of the process (see resolve_view_any's
+        # docstring), so tests must not leak entries into each other.
+        before = set(view_resolution._unresolved_any)
+        self.addCleanup(view_resolution._unresolved_any.clear)
+        self.addCleanup(view_resolution._unresolved_any.update, before)
+
+    def test_resolves_the_first_candidate_that_exists(self):
+        self.assertIs(
+            view_resolution.resolve_view_any(
+                "part.api", ["PartList", "NotARealViewClass"]
+            ),
+            PartList,
+        )
+
+    def test_falls_back_to_a_later_candidate(self):
+        self.assertIs(
+            view_resolution.resolve_view_any(
+                "part.api", ["NotARealViewClass", "PartList"]
+            ),
+            PartList,
+        )
+
+    def test_returns_none_when_no_candidate_exists(self):
+        self.assertIsNone(
+            view_resolution.resolve_view_any(
+                "part.api", ["NotARealViewClass", "AlsoNotReal"]
+            )
+        )
+
+    def test_returns_none_for_a_module_that_does_not_exist(self):
+        self.assertIsNone(
+            view_resolution.resolve_view_any("not.a.real.module", ["Whatever"])
+        )
+
+    def test_caches_a_total_failure_without_re_importing(self):
+        with patch(
+            "inventree_mcp.view_resolution.import_module",
+            side_effect=ImportError("boom"),
+        ) as mock_import:
+            self.assertIsNone(
+                view_resolution.resolve_view_any("some.fake.module", ["X", "Y"])
+            )
+            self.assertIsNone(
+                view_resolution.resolve_view_any("some.fake.module", ["X", "Y"])
+            )
 
         mock_import.assert_called_once()
 

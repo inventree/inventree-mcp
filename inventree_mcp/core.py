@@ -23,9 +23,8 @@ class InvenTreeMCP(SettingsMixin, UrlsMixin, InvenTreePlugin):
     WEBSITE = "https://github.com/inventree/inventree-mcp"
     LICENSE = "MIT"
 
-    # Optionally specify supported InvenTree versions
-    # MIN_VERSION = '0.18.0'
-    # MAX_VERSION = '2.0.0'
+    # Supported InvenTree versions
+    MIN_VERSION = "1.5.0"
 
     # Plugin settings (from SettingsMixin)
     # Ref: https://docs.inventree.org/en/latest/plugins/mixins/settings/

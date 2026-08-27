@@ -17,12 +17,48 @@ from mcp.server.mcpserver.exceptions import ToolError
 from rest_framework import exceptions
 from rest_framework.test import APIRequestFactory, force_authenticate
 from rest_framework.views import APIView
+from rest_framework.viewsets import ViewSetMixin
 
 from .context import get_current_oauth2_token, get_current_user
 from .oauth2_bridge import authentication_classes_for, scoped_view_class
 from .settings import get_plugin_setting
 
 _factory = APIRequestFactory()
+
+# HTTP method -> ViewSet action, for the case where a pk *is* present
+# (GET/'retrieve' is the odd one out - see _viewset_actions()).
+_DETAIL_ACTIONS = {
+    "GET": "retrieve",
+    "PUT": "update",
+    "PATCH": "partial_update",
+    "DELETE": "destroy",
+}
+
+
+def _viewset_actions(
+    view_cls: type[APIView], method: str, view_kwargs: dict[str, Any]
+) -> dict[str, str] | None:
+    """Build the `actions` mapping DRF ViewSet.as_view() requires, or None for a plain view.
+
+    InvenTree core is gradually converting some endpoints (PurchaseOrder so
+    far) from separate List/Detail generic views to a single combined
+    ViewSet class serving both routes - unlike a plain generic view,
+    ViewSet.as_view() can't infer 'list' vs 'retrieve' from the request
+    itself and raises TypeError without an explicit method->action mapping
+    (see rest_framework.viewsets.ViewSetMixin.as_view). A bare
+    view_kwargs['pk'] is what distinguishes a detail call from a list call
+    for every tool in tools/*.py, matching how the URL a real router would
+    generate carries a pk only for detail routes.
+    """
+    if not issubclass(view_cls, ViewSetMixin):
+        return None
+
+    method = method.upper()
+    if method == "GET" and "pk" not in view_kwargs:
+        action = "list"
+    else:
+        action = _DETAIL_ACTIONS[method]
+    return {method.lower(): action}
 
 
 def _call_view_sync(
@@ -51,6 +87,8 @@ def _call_view_sync(
     else:
         request = factory_method(path, data=data or {}, format="json")
 
+    actions = _viewset_actions(view_cls, method, view_kwargs)
+
     if oauth2_token is not None:
         # The MCP request itself was OAuth2-authenticated: make the proxied
         # view see the *real* token (via a real OAuth2Authentication
@@ -60,12 +98,16 @@ def _call_view_sync(
         # presents as a synthetic ForcedAuthentication, which the scope
         # check doesn't recognize as OAuth2 at all. scoped_view_class() also
         # works around a separate InvenTree core bug - see oauth2_bridge.py.
-        view = scoped_view_class(view_cls).as_view(
-            authentication_classes=authentication_classes_for(user, oauth2_token)
+        scoped_cls = scoped_view_class(view_cls)
+        auth_classes = authentication_classes_for(user, oauth2_token)
+        view = (
+            scoped_cls.as_view(actions, authentication_classes=auth_classes)
+            if actions is not None
+            else scoped_cls.as_view(authentication_classes=auth_classes)
         )
     else:
         force_authenticate(request, user=user)
-        view = view_cls.as_view()
+        view = view_cls.as_view(actions) if actions is not None else view_cls.as_view()
 
     response = view(request, **view_kwargs)
     response.render()
@@ -105,6 +147,16 @@ def _user_has_access_sync(view_cls: type[APIView], method: str) -> bool:
     else:
         force_authenticate(request, user=user)
         view = view_cls()
+
+    if isinstance(view, ViewSetMixin):
+        # ViewSetMixin.initialize_request() reads self.action_map (normally
+        # set by .as_view()) to derive self.action - without it, instantiating
+        # the class directly (above) leaves that attribute unset and this
+        # raises AttributeError. The specific action doesn't affect the
+        # permission result (RolePermission keys off request.method, not
+        # view.action) so 'list' stands in here the same way a GET
+        # permission check already stands in for both list and detail tools.
+        view.action_map = _viewset_actions(view_cls, method, {})
 
     view.args = ()
     view.kwargs = {}

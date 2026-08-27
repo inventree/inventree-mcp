@@ -17,6 +17,7 @@ a view class.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from importlib import import_module
 
 import structlog
@@ -28,6 +29,10 @@ logger = structlog.get_logger("inventree")
 # already cheap; a broken one would otherwise re-attempt the import (and
 # re-log the warning) on every single call.
 _unresolved: set[tuple[str, str]] = set()
+
+# Same idea as _unresolved above, but keyed on a resolve_view_any() call's
+# full candidate list - only reached once none of them resolve.
+_unresolved_any: set[tuple[str, tuple[str, ...]]] = set()
 
 
 def resolve_view(module_path: str, class_name: str) -> type | None:
@@ -63,3 +68,52 @@ def resolve_view(module_path: str, class_name: str) -> type | None:
             exc,
         )
         return None
+
+
+def resolve_view_any(module_path: str, class_names: Sequence[str]) -> type | None:
+    """Import the first of *class_names* found in *module_path*, or None if none exist.
+
+    For a resource whose view class(es) changed shape between InvenTree core
+    versions in a way a single name can't cover - e.g. PurchaseOrder's
+    separate PurchaseOrderList/PurchaseOrderDetail views on the 'stable'
+    core release became one combined PurchaseOrderViewSet on 'master' after
+    core PR #12317 - list every name this plugin has ever used for the
+    resource, newest first. Whichever one exists on the running core
+    version resolves silently; only exhausting the whole list logs a
+    warning (an intermediate name not existing is expected on some core
+    versions, not itself a version-mismatch problem - resolve_view()'s
+    per-name warning would be misleading here since a working fallback may
+    still exist).
+
+    Args:
+        module_path: dotted module path, e.g. "order.api".
+        class_names: candidate class names to try in order, e.g.
+            ["PurchaseOrderViewSet", "PurchaseOrderList"].
+
+    Returns:
+        The first resolved class, or None if none of them could be imported.
+    """
+    key = (module_path, tuple(class_names))
+    if key in _unresolved_any:
+        return None
+
+    try:
+        module = import_module(module_path)
+    except ImportError:
+        module = None
+
+    if module is not None:
+        for class_name in class_names:
+            view_cls = getattr(module, class_name, None)
+            if view_cls is not None:
+                return view_cls
+
+    _unresolved_any.add(key)
+    logger.warning(
+        "inventree_mcp: none of %s could be found in %s - tools that depend "
+        "on it will report as unavailable. This usually means the running "
+        "InvenTree core version doesn't match what this plugin expects.",
+        list(class_names),
+        module_path,
+    )
+    return None

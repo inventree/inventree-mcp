@@ -6,7 +6,7 @@ from typing import Any
 
 from ..mcp_server import mcp
 from ..proxy import call_view
-from ..view_resolution import resolve_view
+from ..view_resolution import resolve_view_any
 from ._common import build_query_params
 
 
@@ -62,7 +62,7 @@ async def list_purchase_orders(
     params = build_query_params(base, filters, limit, offset)
 
     return await call_view(
-        resolve_view("order.api", "PurchaseOrderList"),
+        resolve_view_any("order.api", ["PurchaseOrderViewSet", "PurchaseOrderList"]),
         "GET",
         "/api/order/po/",
         query_params=params,
@@ -91,7 +91,7 @@ async def get_purchase_order(
             doesn't have permission to view it.
     """
     return await call_view(
-        resolve_view("order.api", "PurchaseOrderDetail"),
+        resolve_view_any("order.api", ["PurchaseOrderViewSet", "PurchaseOrderDetail"]),
         "GET",
         f"/api/order/po/{order_id}/",
         pk=order_id,
@@ -149,7 +149,9 @@ async def list_purchase_order_lines(
     params = build_query_params(base, filters, limit, offset)
 
     return await call_view(
-        resolve_view("order.api", "PurchaseOrderLineItemList"),
+        resolve_view_any(
+            "order.api", ["PurchaseOrderLineItemViewSet", "PurchaseOrderLineItemList"]
+        ),
         "GET",
         "/api/order/po-line/",
         query_params=params,
@@ -177,7 +179,9 @@ async def get_purchase_order_line(
             have permission to view it.
     """
     return await call_view(
-        resolve_view("order.api", "PurchaseOrderLineItemDetail"),
+        resolve_view_any(
+            "order.api", ["PurchaseOrderLineItemViewSet", "PurchaseOrderLineItemDetail"]
+        ),
         "GET",
         f"/api/order/po-line/{line_id}/",
         pk=line_id,
