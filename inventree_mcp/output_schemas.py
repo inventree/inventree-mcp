@@ -129,6 +129,13 @@ _OUTPUT_SCHEMAS = {
     "get_stock_test_result": serializer_schema(StockItemTestResultSerializer),
     "list_project_codes": paginated_schema(ProjectCodeSerializer),
     "get_project_code": serializer_schema(ProjectCodeSerializer),
+    "make_web_link": {
+        "type": "object",
+        "properties": {
+            "web_url": {"type": ["string", "null"], "format": "uri"},
+            "error": {"type": "string"},
+        },
+    },
 }
 
 

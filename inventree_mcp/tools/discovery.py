@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import structlog
+from asgiref.sync import sync_to_async
 from mcp.server.mcpserver.exceptions import ToolError
 
 from ..expand_introspection import describe_output_options
 from ..filter_introspection import describe_filterset
 from ..mcp_server import mcp
 from ..view_resolution import resolve_view, resolve_view_any
+
+logger = structlog.get_logger("inventree")
 
 
 def _part_list() -> type | None:
@@ -239,3 +243,116 @@ def describe_filters(resource: str) -> dict:
         **describe_filterset(view_cls),
         "optional_fields": describe_output_options(view_cls),
     }
+
+
+# Relative "web" (React frontend) subpaths, one per resource that has a real
+# standalone detail page - matches each model's own get_absolute_url() in
+# InvenTree core (order/models.py, part/models.py, stock/models.py,
+# company/models.py), *not* imported from there directly: doing so would
+# need a real (DB-fetched) model instance just to read a pk-only f-string,
+# and Company.get_absolute_url() unconditionally returns
+# '/purchasing/manufacturer/{pk}' regardless of whether the company is
+# actually a supplier/manufacturer/customer (looks like a core bug -
+# verified against src/frontend/src/router.tsx, which also registers a
+# generic 'company/:id' route that resolves correctly for any role - used
+# here instead of reproducing that bug). manufacturer_part has no
+# get_absolute_url() in core at all; its route
+# ('purchasing/manufacturer-part/:id') is hardcoded here straight from
+# router.tsx. Resources with no standalone page (line items, allocations,
+# attachments, and other records only ever shown embedded in a parent's
+# page) are deliberately absent - make_web_link() rejects them below.
+_WEB_LINK_PATHS: dict[str, str] = {
+    "part": "/part/{pk}",
+    "category": "/part/category/{pk}",
+    "stock": "/stock/item/{pk}",
+    "location": "/stock/location/{pk}",
+    "purchase_order": "/purchasing/purchase-order/{pk}",
+    "supplier_part": "/purchasing/supplier-part/{pk}",
+    "manufacturer_part": "/purchasing/manufacturer-part/{pk}",
+    "company": "/company/{pk}",
+    "sales_order": "/sales/sales-order/{pk}",
+    "return_order": "/sales/return-order/{pk}",
+    "build_order": "/manufacturing/build-order/{pk}",
+}
+
+
+def _build_web_link(model_type: str, model_id: int) -> dict:
+    path_template = _WEB_LINK_PATHS.get(model_type)
+
+    if path_template is None:
+        raise ToolError(
+            f"{model_type!r} has no standalone web page. Choose one of: "
+            f"{', '.join(_WEB_LINK_PATHS)}"
+        )
+
+    try:
+        from InvenTree.helpers import pui_url
+        from InvenTree.helpers_model import construct_absolute_url, get_base_url
+    except ImportError as exc:
+        # Defensive, same reasoning as view_resolution.py: a version
+        # mismatch between this plugin and the running InvenTree core
+        # shouldn't crash the tool, just leave it unable to build a link -
+        # but unlike the "no base URL configured" case below, this is a real
+        # failure, so log it and tell the caller why, not just null.
+        logger.warning(
+            "inventree_mcp: could not import URL-building helpers (%s) - "
+            "make_web_link will report web_url as unavailable. This usually "
+            "means the running InvenTree core version doesn't match what "
+            "this plugin expects.",
+            exc,
+        )
+        return {
+            "web_url": None,
+            "error": ("Could not build a web link with the provided information."),
+        }
+
+    if not get_base_url():
+        return {
+            "web_url": None,
+            "error": ("Base URL is not configured for this InvenTree instance."),
+        }
+
+    return {
+        "web_url": construct_absolute_url(pui_url(path_template.format(pk=model_id)))
+    }
+
+
+@mcp.tool()
+async def make_web_link(model_type: str, model_id: int) -> dict:
+    """Build a clickable InvenTree web UI link for a specific record.
+
+    Does not touch any InvenTree data - this only builds a URL string, the
+    same way describe_filters only describes static metadata. It doesn't
+    verify model_id actually exists; a valid ID from the matching
+    list_*/get_* tool always produces a valid link.
+
+    Not every resource has a standalone page in the web UI - only the ones
+    listed below do. A PurchaseOrderLineItem, for example, is only ever
+    shown embedded in its parent order's page - call this with the parent
+    purchase_order's ID instead of trying it with a line item.
+
+    Args:
+        model_type: one of "part", "category", "stock", "location",
+            "purchase_order", "supplier_part", "manufacturer_part",
+            "company", "sales_order", "return_order", "build_order" -
+            matches get_part / get_category / get_stock_item / get_location
+            / get_purchase_order / get_supplier_part / get_manufacturer_part
+            / get_company / get_sales_order / get_return_order /
+            get_build_order.
+        model_id: the record's database ID (its `pk` field, from the
+            matching list_*/get_* tool).
+
+    Returns:
+        {"web_url": <url>} - a full, absolute URL - if this InvenTree
+        instance has a configured base URL to build one from (SITE_URL /
+        Django Sites / the INVENTREE_BASE_URL global setting).
+        {"web_url": null, "error": <message>} otherwise, explaining why no
+        link could be built - either the server just isn't configured with
+        a base URL (nothing wrong with the call itself), or the running
+        InvenTree core version doesn't match what this plugin expects (a
+        real failure, also logged server-side).
+
+    Raises:
+        ToolError: model_type isn't one of the resources listed above.
+    """
+    return await sync_to_async(_build_web_link)(model_type, model_id)
