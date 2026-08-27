@@ -847,24 +847,30 @@ class MCPToolPermissionTest(InvenTreeTestCase):
         images_only = await list_attachments(is_image=True)
         self.assertNotIn(self.attachment.pk, [a["pk"] for a in images_only["results"]])
 
-    async def test_unauthorized_user_can_still_read_attachments(self):
-        """Deliberately the opposite assertion from every other resource's denial test.
+    async def test_unauthorized_user_cannot_read_attachments(self):
+        """Attachment reads are gated by the *linked* model's own view permission.
 
-        AttachmentList/Detail have no RolePermission/RuleSet gate on reads -
-        only IsAuthenticatedOrReadScope (any authenticated user) - see
-        tools/attachments.py's module docstring. A zero-role user must still
-        succeed here; asserting ToolError (the pattern used everywhere else
-        in this file) would be testing for the wrong thing and would mask a
-        real regression if this view's permissions ever tightened.
+        InvenTree core commit 528bb085d7 ("User permissions check for
+        Attachment API (#12689)") closed a prior gap where Attachment reads
+        had no RuleSet check at all - AttachmentList.get_queryset() now
+        filters to model_types the user can view (get_viewable_attachment_
+        model_types() in common/api.py), and AttachmentDetail.retrieve()
+        checks the specific object's permission directly. The Attachment
+        *view* itself still only requires IsAuthenticatedOrReadScope (any
+        authenticated user), so unlike every other gated resource's list
+        tool, list_attachments doesn't raise ToolError for a zero-role user
+        - it succeeds (200) with the inaccessible attachment filtered out of
+        the results instead. Only get_attachment raises, since that's where
+        the per-object permission check lives.
         """
         self._as(self.no_access_user)
 
         listed = await list_attachments(model_type="part", model_id=self.part.pk)
         ids = [a["pk"] for a in listed["results"]]
-        self.assertIn(self.attachment.pk, ids)
+        self.assertNotIn(self.attachment.pk, ids)
 
-        detail = await get_attachment(self.attachment.pk)
-        self.assertEqual(detail["pk"], self.attachment.pk)
+        with self.assertRaises(ToolError):
+            await get_attachment(self.attachment.pk)
 
     async def test_authorized_user_can_list_and_get_parameters(self):
         self._as(self.user)
