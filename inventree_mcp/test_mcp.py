@@ -1310,6 +1310,66 @@ class ViewResolutionTest(unittest.TestCase):
         mock_import.assert_called_once()
 
 
+class ResolveViewAnyTest(unittest.TestCase):
+    """resolve_view_any() must fall back across a renamed-between-core-versions class.
+
+    Covers the PurchaseOrderList/PurchaseOrderDetail ('stable') vs
+    PurchaseOrderViewSet ('master', core PR #12317) case - tools/*.py can't
+    hardcode either name alone without breaking on the other core version.
+    """
+
+    def setUp(self):
+        super().setUp()
+        # Same isolation reasoning as ViewResolutionTest.setUp - this cache
+        # persists for the life of the process (see resolve_view_any's
+        # docstring), so tests must not leak entries into each other.
+        before = set(view_resolution._unresolved_any)
+        self.addCleanup(view_resolution._unresolved_any.clear)
+        self.addCleanup(view_resolution._unresolved_any.update, before)
+
+    def test_resolves_the_first_candidate_that_exists(self):
+        self.assertIs(
+            view_resolution.resolve_view_any(
+                "part.api", ["PartList", "NotARealViewClass"]
+            ),
+            PartList,
+        )
+
+    def test_falls_back_to_a_later_candidate(self):
+        self.assertIs(
+            view_resolution.resolve_view_any(
+                "part.api", ["NotARealViewClass", "PartList"]
+            ),
+            PartList,
+        )
+
+    def test_returns_none_when_no_candidate_exists(self):
+        self.assertIsNone(
+            view_resolution.resolve_view_any(
+                "part.api", ["NotARealViewClass", "AlsoNotReal"]
+            )
+        )
+
+    def test_returns_none_for_a_module_that_does_not_exist(self):
+        self.assertIsNone(
+            view_resolution.resolve_view_any("not.a.real.module", ["Whatever"])
+        )
+
+    def test_caches_a_total_failure_without_re_importing(self):
+        with patch(
+            "inventree_mcp.view_resolution.import_module",
+            side_effect=ImportError("boom"),
+        ) as mock_import:
+            self.assertIsNone(
+                view_resolution.resolve_view_any("some.fake.module", ["X", "Y"])
+            )
+            self.assertIsNone(
+                view_resolution.resolve_view_any("some.fake.module", ["X", "Y"])
+            )
+
+        mock_import.assert_called_once()
+
+
 class CallViewImportSafetyTest(InvenTreeTestCase):
     """call_view(None, ...) must raise a clean ToolError, not an AttributeError.
 

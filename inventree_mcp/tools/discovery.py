@@ -7,7 +7,7 @@ from mcp.server.mcpserver.exceptions import ToolError
 from ..expand_introspection import describe_output_options
 from ..filter_introspection import describe_filterset
 from ..mcp_server import mcp
-from ..view_resolution import resolve_view
+from ..view_resolution import resolve_view, resolve_view_any
 
 
 def _part_list() -> type | None:
@@ -27,11 +27,16 @@ def _category_list() -> type | None:
 
 
 def _purchase_order_list() -> type | None:
-    return resolve_view("order.api", "PurchaseOrderList")
+    # 'master' core (PR #12317) combined the old List/Detail views into one
+    # ViewSet - try that first, falling back to the pre-#12317 name so this
+    # keeps working against 'stable' too. See resolve_view_any()'s docstring.
+    return resolve_view_any("order.api", ["PurchaseOrderViewSet", "PurchaseOrderList"])
 
 
 def _purchase_order_line_list() -> type | None:
-    return resolve_view("order.api", "PurchaseOrderLineItemList")
+    return resolve_view_any(
+        "order.api", ["PurchaseOrderLineItemViewSet", "PurchaseOrderLineItemList"]
+    )
 
 
 def _sales_order_list() -> type | None:
