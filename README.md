@@ -65,7 +65,9 @@ For a client that supports remote Streamable HTTP servers directly, add:
 ```
 
 For a client that only supports local (stdio) servers, bridge it with
-[`mcp-remote`](https://www.npmjs.com/package/mcp-remote):
+[`mcp-remote`](https://www.npmjs.com/package/mcp-remote)
+
+*Note: You will need to have node available on your system path*
 
 ```json
 {
@@ -73,13 +75,27 @@ For a client that only supports local (stdio) servers, bridge it with
     "inventree": {
       "command": "npx",
       "args": [
-        "mcp-remote",
+        "-y",
+        "mcp-remote@latest",
         "https://<your-inventree-server>/plugin/inventree-mcp/mcp/",
         "--header",
         "Authorization: Token <your-api-token>"
       ]
     }
   }
+}
+```
+
+*Note: On Windows, you may need to substitute `npx` with `C:\\PROGRA~1\\nodejs\\npx.cmd` in the command field.*
+
+In a setup where the server is running a self-signed certificate, you may need to use the following `env` arguments to disable certificate verification:
+
+```json
+"args": [
+  ...
+],
+"env": {
+  "NODE_TLS_REJECT_UNAUTHORIZED": "0"
 }
 ```
 
