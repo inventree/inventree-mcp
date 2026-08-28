@@ -21,7 +21,7 @@ async def list_manufacturer_parts(
     manufacturer: int | None = None,
     ordering: str | None = None,
     filters: dict[str, Any] | None = None,
-    limit: int = 25,
+    limit: int = 100,
     offset: int = 0,
 ) -> dict:
     """List manufacturer parts - links between an internal Part and a manufacturer's MPN.
@@ -43,7 +43,9 @@ async def list_manufacturer_parts(
         filters: additional filter parameters beyond the named arguments
             above - call describe_filters("manufacturer_part") to see
             what's available, e.g. filters={"MPN": "ABC-123"}.
-        limit: maximum number of results to return (capped at 100).
+        limit: maximum number of results to return - defaults to 100 (the
+            maximum) to minimize round trips for large result sets; pass a
+            smaller value to page through results in smaller batches.
         offset: pagination offset.
     """
     base: dict[str, Any] = {}
@@ -100,7 +102,7 @@ async def list_supplier_parts(
     manufacturer_part: int | None = None,
     ordering: str | None = None,
     filters: dict[str, Any] | None = None,
-    limit: int = 25,
+    limit: int = 100,
     offset: int = 0,
 ) -> dict:
     """List supplier parts - a supplier's SKU/pricing for a Part.
@@ -128,7 +130,9 @@ async def list_supplier_parts(
             above - call describe_filters("supplier_part") to see what's
             available, e.g. filters={"has_stock": true} or
             filters={"SKU": "SKU-123"}.
-        limit: maximum number of results to return (capped at 100).
+        limit: maximum number of results to return - defaults to 100 (the
+            maximum) to minimize round trips for large result sets; pass a
+            smaller value to page through results in smaller batches.
         offset: pagination offset.
     """
     base: dict[str, Any] = {}

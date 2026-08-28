@@ -25,7 +25,7 @@ async def list_stock_tracking(
     user: int | None = None,
     ordering: str | None = None,
     filters: dict[str, Any] | None = None,
-    limit: int = 25,
+    limit: int = 100,
     offset: int = 0,
 ) -> dict:
     """List stock tracking entries - the audit trail of what happened to stock items.
@@ -56,7 +56,9 @@ async def list_stock_tracking(
         filters: additional filter parameters beyond the named arguments
             above - call describe_filters("stock_tracking") to see what's
             available, e.g. filters={"min_date": "2024-01-01"}.
-        limit: maximum number of results to return (capped at 100).
+        limit: maximum number of results to return - defaults to 100 (the
+            maximum) to minimize round trips for large result sets; pass a
+            smaller value to page through results in smaller batches.
         offset: pagination offset.
     """
     base: dict[str, Any] = {}
@@ -115,7 +117,7 @@ async def list_stock_test_results(
     result: bool | None = None,
     ordering: str | None = None,
     filters: dict[str, Any] | None = None,
-    limit: int = 25,
+    limit: int = 100,
     offset: int = 0,
 ) -> dict:
     """List stock item test results (QA pass/fail records).
@@ -146,7 +148,9 @@ async def list_stock_test_results(
             above - call describe_filters("stock_test_result") to see
             what's available, e.g. filters={"build": <id>} for results
             recorded against stock from a specific build order.
-        limit: maximum number of results to return (capped at 100).
+        limit: maximum number of results to return - defaults to 100 (the
+            maximum) to minimize round trips for large result sets; pass a
+            smaller value to page through results in smaller batches.
         offset: pagination offset.
     """
     base: dict[str, Any] = {}

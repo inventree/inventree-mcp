@@ -17,7 +17,7 @@ async def list_sales_orders(
     outstanding: bool | None = None,
     ordering: str | None = None,
     filters: dict[str, Any] | None = None,
-    limit: int = 25,
+    limit: int = 100,
     offset: int = 0,
 ) -> dict:
     """List sales orders.
@@ -46,7 +46,9 @@ async def list_sales_orders(
         filters: additional filter parameters beyond the named arguments
             above - call describe_filters("sales_order") to see what's
             available, e.g. filters={"overdue": true}.
-        limit: maximum number of results to return (capped at 100).
+        limit: maximum number of results to return - defaults to 100 (the
+            maximum) to minimize round trips for large result sets; pass a
+            smaller value to page through results in smaller batches.
         offset: pagination offset.
     """
     base: dict[str, Any] = {}
@@ -107,7 +109,7 @@ async def list_sales_order_lines(
     completed: bool | None = None,
     ordering: str | None = None,
     filters: dict[str, Any] | None = None,
-    limit: int = 25,
+    limit: int = 100,
     offset: int = 0,
 ) -> dict:
     """List sales order line items.
@@ -133,7 +135,9 @@ async def list_sales_order_lines(
         filters: additional filter parameters beyond the named arguments
             above - call describe_filters("sales_order_line") to see what's
             available.
-        limit: maximum number of results to return (capped at 100).
+        limit: maximum number of results to return - defaults to 100 (the
+            maximum) to minimize round trips for large result sets; pass a
+            smaller value to page through results in smaller batches.
         offset: pagination offset.
     """
     base: dict[str, Any] = {}
@@ -195,7 +199,7 @@ async def list_sales_order_allocations(
     part: int | None = None,
     ordering: str | None = None,
     filters: dict[str, Any] | None = None,
-    limit: int = 25,
+    limit: int = 100,
     offset: int = 0,
 ) -> dict:
     """List sales order allocations - stock items reserved against sales order lines.
@@ -225,7 +229,9 @@ async def list_sales_order_allocations(
             above - call describe_filters("sales_order_allocation") to see
             what's available, e.g. filters={"assigned_to_shipment": false}
             for allocations not yet assigned to a shipment.
-        limit: maximum number of results to return (capped at 100).
+        limit: maximum number of results to return - defaults to 100 (the
+            maximum) to minimize round trips for large result sets; pass a
+            smaller value to page through results in smaller batches.
         offset: pagination offset.
     """
     base: dict[str, Any] = {}

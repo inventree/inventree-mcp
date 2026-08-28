@@ -2308,3 +2308,34 @@ class BuildQueryParamsTest(unittest.TestCase):
         params = build_query_params({"a": 1}, None, limit=5, offset=0)
 
         self.assertEqual(params, {"a": 1, "limit": 5, "offset": 0})
+
+
+class ListToolDefaultLimitTest(InvenTreeTestCase):
+    """Every list_* tool's own `limit` default must match DEFAULT_LIMIT, not just
+    clamp_limit()'s fallback for the limit<=0 edge case.
+
+    Each tools/*.py list_* function hardcodes its own `limit: int = ...`
+    default in its signature - an agent that omits `limit` entirely never
+    reaches clamp_limit()'s own DEFAULT_LIMIT fallback, it gets whatever
+    that per-tool default is. ClampLimitTest only covers the shared
+    fallback; this guards against one file's signature drifting back to the
+    old default (25) while _common.DEFAULT_LIMIT and the rest stay at 100 -
+    checked via each tool's registered input schema (what an MCP client
+    actually sees), not by re-reading the source.
+    """
+
+    async def test_every_list_tool_defaults_limit_to_100(self):
+        tools = await mcp.list_tools()
+        list_tools = [tool for tool in tools if tool.name.startswith("list_")]
+
+        # Sanity check the filter above actually caught something, so this
+        # test can't silently pass by iterating over an empty list.
+        self.assertGreater(len(list_tools), 20)
+
+        wrong_defaults = {
+            tool.name: tool.input_schema["properties"]["limit"].get("default")
+            for tool in list_tools
+            if tool.input_schema["properties"]["limit"].get("default") != DEFAULT_LIMIT
+        }
+
+        self.assertEqual(wrong_defaults, {})

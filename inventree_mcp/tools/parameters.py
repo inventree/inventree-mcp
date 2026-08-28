@@ -28,7 +28,7 @@ async def list_parameters(
     template: int | None = None,
     ordering: str | None = None,
     filters: dict[str, Any] | None = None,
-    limit: int = 25,
+    limit: int = 100,
     offset: int = 0,
 ) -> dict:
     """List parameters (named attribute values) recorded against InvenTree records.
@@ -72,7 +72,9 @@ async def list_parameters(
         filters: additional filter parameters beyond the named arguments
             above - call describe_filters("parameter") to see what's
             available.
-        limit: maximum number of results to return (capped at 100).
+        limit: maximum number of results to return - defaults to 100 (the
+            maximum) to minimize round trips for large result sets; pass a
+            smaller value to page through results in smaller batches.
         offset: pagination offset.
     """
     base: dict[str, Any] = {}
@@ -128,7 +130,7 @@ async def list_parameter_templates(
     search: str | None = None,
     ordering: str | None = None,
     filters: dict[str, Any] | None = None,
-    limit: int = 25,
+    limit: int = 100,
     offset: int = 0,
 ) -> dict:
     """List parameter templates - the named attribute definitions parameters reference.
@@ -154,7 +156,9 @@ async def list_parameter_templates(
             above - call describe_filters("parameter_template") to see
             what's available, e.g. filters={"units": "V"} or
             filters={"has_choices": true}.
-        limit: maximum number of results to return (capped at 100).
+        limit: maximum number of results to return - defaults to 100 (the
+            maximum) to minimize round trips for large result sets; pass a
+            smaller value to page through results in smaller batches.
         offset: pagination offset.
     """
     base: dict[str, Any] = {}

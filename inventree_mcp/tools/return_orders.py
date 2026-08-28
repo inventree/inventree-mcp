@@ -23,7 +23,7 @@ async def list_return_orders(
     outstanding: bool | None = None,
     ordering: str | None = None,
     filters: dict[str, Any] | None = None,
-    limit: int = 25,
+    limit: int = 100,
     offset: int = 0,
 ) -> dict:
     """List return orders.
@@ -51,7 +51,9 @@ async def list_return_orders(
         filters: additional filter parameters beyond the named arguments
             above - call describe_filters("return_order") to see what's
             available, e.g. filters={"overdue": true}.
-        limit: maximum number of results to return (capped at 100).
+        limit: maximum number of results to return - defaults to 100 (the
+            maximum) to minimize round trips for large result sets; pass a
+            smaller value to page through results in smaller batches.
         offset: pagination offset.
     """
     base: dict[str, Any] = {}
@@ -111,7 +113,7 @@ async def list_return_order_lines(
     received: bool | None = None,
     ordering: str | None = None,
     filters: dict[str, Any] | None = None,
-    limit: int = 25,
+    limit: int = 100,
     offset: int = 0,
 ) -> dict:
     """List return order line items.
@@ -136,7 +138,9 @@ async def list_return_order_lines(
             above - call describe_filters("return_order_line") to see
             what's available, e.g. filters={"outcome": <code>} for lines
             with a specific return outcome recorded.
-        limit: maximum number of results to return (capped at 100).
+        limit: maximum number of results to return - defaults to 100 (the
+            maximum) to minimize round trips for large result sets; pass a
+            smaller value to page through results in smaller batches.
         offset: pagination offset.
     """
     base: dict[str, Any] = {}

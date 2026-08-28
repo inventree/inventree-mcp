@@ -22,7 +22,7 @@ async def list_parts(
     active: bool | None = None,
     ordering: str | None = None,
     filters: dict[str, Any] | None = None,
-    limit: int = 25,
+    limit: int = 100,
     offset: int = 0,
 ) -> dict:
     """List parts in the InvenTree database.
@@ -46,7 +46,9 @@ async def list_parts(
         filters: additional filter parameters beyond the named arguments
             above - call describe_filters("part") to see what's available,
             e.g. filters={"is_variant": true}.
-        limit: maximum number of results to return (capped at 100).
+        limit: maximum number of results to return - defaults to 100 (the
+            maximum) to minimize round trips for large result sets; pass a
+            smaller value to page through results in smaller batches.
         offset: pagination offset.
     """
     base: dict[str, Any] = {}
