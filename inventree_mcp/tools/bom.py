@@ -36,7 +36,7 @@ async def list_bom_items(
     category: int | None = None,
     ordering: str | None = None,
     filters: dict[str, Any] | None = None,
-    limit: int = 25,
+    limit: int = 100,
     offset: int = 0,
 ) -> dict:
     """List BOM (Bill of Materials) items - the components required to build an assembly.
@@ -79,7 +79,9 @@ async def list_bom_items(
             above - call describe_filters("bom_item") to see what's
             available, e.g. filters={"validated": false} for lines whose
             checksum hasn't been confirmed, or filters={"available_stock": true}.
-        limit: maximum number of results to return (capped at 100).
+        limit: maximum number of results to return - defaults to 100 (the
+            maximum) to minimize round trips for large result sets; pass a
+            smaller value to page through results in smaller batches.
         offset: pagination offset.
     """
     base: dict[str, Any] = {}
@@ -131,7 +133,7 @@ async def list_bom_substitutes(
     part: int | None = None,
     ordering: str | None = None,
     filters: dict[str, Any] | None = None,
-    limit: int = 25,
+    limit: int = 100,
     offset: int = 0,
 ) -> dict:
     """List BOM item substitutes - alternative parts permitted in place of a BOM line's sub_part.
@@ -157,7 +159,9 @@ async def list_bom_substitutes(
         filters: additional filter parameters beyond the named arguments
             above - call describe_filters("bom_substitute") to see what's
             available.
-        limit: maximum number of results to return (capped at 100).
+        limit: maximum number of results to return - defaults to 100 (the
+            maximum) to minimize round trips for large result sets; pass a
+            smaller value to page through results in smaller batches.
         offset: pagination offset.
     """
     base: dict[str, Any] = {}

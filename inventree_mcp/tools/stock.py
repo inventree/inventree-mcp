@@ -17,7 +17,7 @@ async def list_stock_items(
     in_stock: bool | None = None,
     ordering: str | None = None,
     filters: dict[str, Any] | None = None,
-    limit: int = 25,
+    limit: int = 100,
     offset: int = 0,
 ) -> dict:
     """List stock items.
@@ -45,7 +45,9 @@ async def list_stock_items(
         filters: additional filter parameters beyond the named arguments
             above - call describe_filters("stock") to see what's available,
             e.g. filters={"low_stock": true}.
-        limit: maximum number of results to return (capped at 100).
+        limit: maximum number of results to return - defaults to 100 (the
+            maximum) to minimize round trips for large result sets; pass a
+            smaller value to page through results in smaller batches.
         offset: pagination offset.
     """
     base: dict[str, Any] = {}

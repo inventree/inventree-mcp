@@ -17,7 +17,7 @@ async def list_build_orders(
     outstanding: bool | None = None,
     ordering: str | None = None,
     filters: dict[str, Any] | None = None,
-    limit: int = 25,
+    limit: int = 100,
     offset: int = 0,
 ) -> dict:
     """List build orders (manufacturing orders).
@@ -46,7 +46,9 @@ async def list_build_orders(
         filters: additional filter parameters beyond the named arguments
             above - call describe_filters("build_order") to see what's
             available, e.g. filters={"overdue": true}.
-        limit: maximum number of results to return (capped at 100).
+        limit: maximum number of results to return - defaults to 100 (the
+            maximum) to minimize round trips for large result sets; pass a
+            smaller value to page through results in smaller batches.
         offset: pagination offset.
     """
     base: dict[str, Any] = {}
@@ -104,7 +106,7 @@ async def list_build_lines(
     build: int | None = None,
     ordering: str | None = None,
     filters: dict[str, Any] | None = None,
-    limit: int = 25,
+    limit: int = 100,
     offset: int = 0,
 ) -> dict:
     """List build order line items - the components required to complete a build order.
@@ -132,7 +134,9 @@ async def list_build_lines(
             available, e.g. filters={"allocated": false} for lines still
             needing stock, or filters={"consumable": false} to exclude
             consumable (non-tracked) components.
-        limit: maximum number of results to return (capped at 100).
+        limit: maximum number of results to return - defaults to 100 (the
+            maximum) to minimize round trips for large result sets; pass a
+            smaller value to page through results in smaller batches.
         offset: pagination offset.
     """
     base: dict[str, Any] = {}
@@ -183,7 +187,7 @@ async def list_build_items(
     part: int | None = None,
     ordering: str | None = None,
     filters: dict[str, Any] | None = None,
-    limit: int = 25,
+    limit: int = 100,
     offset: int = 0,
 ) -> dict:
     """List build order allocations - stock items reserved against build order lines.
@@ -211,7 +215,9 @@ async def list_build_items(
             above - call describe_filters("build_item") to see what's
             available, e.g. filters={"output": null} for allocations not
             yet installed into a specific build output.
-        limit: maximum number of results to return (capped at 100).
+        limit: maximum number of results to return - defaults to 100 (the
+            maximum) to minimize round trips for large result sets; pass a
+            smaller value to page through results in smaller batches.
         offset: pagination offset.
     """
     base: dict[str, Any] = {}

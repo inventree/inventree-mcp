@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-DEFAULT_LIMIT = 25
+DEFAULT_LIMIT = 100
 MAX_LIMIT = 100
 
 
@@ -13,7 +13,11 @@ def clamp_limit(limit: int) -> int:
 
     Prevents a single tool call from dumping an unbounded number of records
     (or being handed a negative/zero value which some list views treat as
-    "no limit").
+    "no limit"). DEFAULT_LIMIT == MAX_LIMIT deliberately - every list_* tool's
+    own `limit` parameter already defaults to DEFAULT_LIMIT (so an agent
+    that omits it gets a full page, minimizing tool calls for a large
+    result set), and this is the fallback for the one case that bypasses
+    that default: a caller passing limit=0 or a negative number explicitly.
     """
     if limit <= 0:
         return DEFAULT_LIMIT
