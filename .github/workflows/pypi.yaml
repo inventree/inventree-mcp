@@ -1,6 +1,5 @@
 # Publish to PyPi package index
-# Note: Requires a secret named PYPI_API_TOKEN to be set in the repository settings
-
+# Uses PyPI Trusted Publishing (OIDC) - no API token secret required
 name: PIP Publish
 
 on:
@@ -8,29 +7,27 @@ on:
     types: [published]
 
 jobs:
-
   publish:
     name: Publish to PyPi
     runs-on: ubuntu-latest
-
+    permissions:
+      id-token: write  # required for trusted publishing (OIDC)
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
+
       - name: Setup Python
-        uses: actions/setup-python@v2
+        uses: actions/setup-python@v5
         with:
           python-version: 3.11
+
       - name: Install Python Dependencies
         run: |
-          pip install --upgrade wheel setuptools twine build
+          pip install --upgrade build
+
       - name: Build Binary
         run: |
           python -m build
+
       - name: Publish
-        run: |
-          python -m twine upload dist/*
-        env:
-          TWINE_USERNAME: __token__
-          TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
-          TWINE_REPOSITORY: pypi
-  
+        uses: pypa/gh-action-pypi-publish@release/v1
