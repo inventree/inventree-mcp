@@ -36,6 +36,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 from asgiref.sync import async_to_sync
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.urls import path
+from django.views.decorators.csrf import csrf_exempt
 from InvenTree.permissions import auth_exempt
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 from oauth2_provider.contrib.rest_framework.authentication import OAuth2Authentication
@@ -216,4 +217,6 @@ class MCPView(APIView):
             reset_current_user(token)
 
 
-urlpatterns = [path("mcp/", auth_exempt(MCPView.as_view()), name="mcp-endpoint")]
+urlpatterns = [
+    path("mcp/", csrf_exempt(auth_exempt(MCPView.as_view())), name="mcp-endpoint")
+]
