@@ -28,6 +28,7 @@ from django.contrib.auth.models import AnonymousUser
 from django.contrib.contenttypes.models import ContentType
 from django.test import Client, override_settings
 from django.utils import timezone
+from InvenTree.api_version import INVENTREE_API_VERSION
 from InvenTree.unit_test import InvenTreeTestCase
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import CallToolResult
@@ -129,6 +130,9 @@ from .tools.supplier_parts import (
     list_manufacturer_parts,
     list_supplier_parts,
 )
+
+# API version to gate parameter permission checks
+PARAMETER_PERMISSION_FIX_MIN_API_VERSION = 541
 
 
 @override_settings(PLUGIN_TESTING_SETUP=True)
@@ -897,19 +901,44 @@ class MCPToolPermissionTest(InvenTreeTestCase):
         detail = await get_parameter_template(self.parameter_template.pk)
         self.assertEqual(detail["units"], "ohm")
 
-    async def test_unauthorized_user_can_still_read_parameters(self):
-        """Same "opposite of every other resource" case as attachments, above -
-        ParameterList/Detail and ParameterTemplateList/Detail have no
-        RolePermission/RuleSet gate on reads either.
+    async def test_unauthorized_user_parameter_read_access(self):
+        """Parameter reads are gated by the *linked* model's own view permission -
+        but only on core versions carrying the fix (see
+        PARAMETER_PERMISSION_FIX_MIN_API_VERSION above).
+
+        On a fixed core, `ParameterMixin.get_queryset()` (common/api.py) now
+        scopes Parameter reads to the model types the requesting user can
+        view - closing the same "no RuleSet check at all" gap that commit
+        528bb085d7 closed for Attachment, above. ParameterList/Detail still
+        only require IsAuthenticatedOrReadScope, so list_parameters doesn't
+        raise ToolError for a zero-role user - it succeeds (200) with the
+        inaccessible parameter filtered out of the results, same as
+        list_attachments. get_parameter does raise, since the filtered-out
+        object 404s on retrieve.
+
+        On a pre-fix core (e.g. the CI matrix's 'stable' leg), neither
+        ParameterList/Detail has any role check at all, so both calls
+        succeed and return the parameter regardless of role - the opposite
+        assertion from every other gated resource's denial test.
+
+        ParameterTemplate is unaffected either way - ParameterTemplateMixin
+        uses IsStaffOrReadOnlyScope, which allows read for any authenticated
+        user regardless of role, so list_parameter_templates always
+        succeeds for a zero-role user.
         """
         self._as(self.no_access_user)
 
         listed = await list_parameters(model_type="part.part", model_id=self.part.pk)
         ids = [p["pk"] for p in listed["results"]]
-        self.assertIn(self.parameter.pk, ids)
 
-        detail = await get_parameter(self.parameter.pk)
-        self.assertEqual(detail["pk"], self.parameter.pk)
+        if INVENTREE_API_VERSION >= PARAMETER_PERMISSION_FIX_MIN_API_VERSION:
+            self.assertNotIn(self.parameter.pk, ids)
+            with self.assertRaises(ToolError):
+                await get_parameter(self.parameter.pk)
+        else:
+            self.assertIn(self.parameter.pk, ids)
+            detail = await get_parameter(self.parameter.pk)
+            self.assertEqual(detail["pk"], self.parameter.pk)
 
         templates = await list_parameter_templates()
         self.assertTrue(templates["results"])
