@@ -119,3 +119,28 @@ Access follows the calling user's normal InvenTree role assignments. Supported a
   token without creating a separate low-privilege user.
 
 Session/cookie auth is not supported (not meaningful for a machine client).
+
+### OIDC (behind an MCP gateway)
+
+If InvenTree signs users in through an OpenID provider (SSO via django-allauth), the endpoint can
+also accept that provider's JWT access tokens: `Authorization: Bearer <jwt>`. This is meant for a
+gateway or middleware that authenticates MCP clients against the provider and forwards the token.
+
+The token's signature is checked against the provider's JWKS, along with `iss`, `aud`, `exp` and
+`iat`. Its `sub` is mapped to the InvenTree user whose allauth social account for that provider has
+that uid, the link SSO login already created, and the request then runs with that user's roles
+like any other. A subject with no linked account is refused. So is a machine token (`sub == azp`,
+e.g. client credentials), unless it is mapped to a user explicitly.
+
+Configure under **Settings > Plugin Settings**. Each setting can also come from an
+`INVENTREE_MCP_<KEY>` environment variable, which takes precedence:
+
+- `OIDC_ISSUER`: the expected `iss`, matched exactly. Empty (the default) turns OIDC off.
+- `OIDC_AUDIENCE`: an `aud` value the token must carry, usually the MCP URL at your gateway.
+- `OIDC_PROVIDER`: the allauth provider id of the SSO login (the `provider` on the linked social
+  account).
+- `OIDC_JWKS_URL` (optional): where to fetch signing keys. Defaults to `jwks_uri` from the
+  issuer's discovery document.
+- `OIDC_CLIENT_USERS` (optional): `client_id=username` pairs, comma separated, for machine tokens.
+
+InvenTree's own OAuth2 tokens are opaque rather than JWTs, so they keep working when OIDC is on.

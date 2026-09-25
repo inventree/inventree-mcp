@@ -34,3 +34,13 @@ def get_plugin_setting(key: str, default: bool = True) -> bool:
         return bool(plugin.get_setting(key))
 
     return default
+
+
+def get_plugin_value(key: str, default: Any = None) -> Any:
+    """Read one of this plugin's settings as stored, failing safe to *default*."""
+    plugin = _get_plugin_instance()
+    if plugin is None:
+        return default
+    with contextlib.suppress(Exception):
+        return plugin.get_setting(key)
+    return default

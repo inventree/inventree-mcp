@@ -43,6 +43,31 @@ class InvenTreeMCP(WellKnownMixin, SettingsMixin, UrlsMixin, InvenTreePlugin):
             "validator": bool,
             "default": True,
         },
+        "OIDC_ISSUER": {
+            "name": "OIDC Issuer",
+            "description": "Accept bearer JWTs from this OpenID provider (exact 'iss', trailing slash included). Empty disables OIDC. Env override: INVENTREE_MCP_OIDC_ISSUER.",
+            "default": "",
+        },
+        "OIDC_AUDIENCE": {
+            "name": "OIDC Audience",
+            "description": "Required 'aud' entry, usually the MCP resource URL at your gateway. Env override: INVENTREE_MCP_OIDC_AUDIENCE.",
+            "default": "",
+        },
+        "OIDC_PROVIDER": {
+            "name": "OIDC SSO Provider",
+            "description": "django-allauth provider id whose linked account uid equals the token 'sub'. Env override: INVENTREE_MCP_OIDC_PROVIDER.",
+            "default": "",
+        },
+        "OIDC_JWKS_URL": {
+            "name": "OIDC JWKS URL",
+            "description": "Signing keys URL. Empty uses jwks_uri from the issuer's discovery document. Env override: INVENTREE_MCP_OIDC_JWKS_URL.",
+            "default": "",
+        },
+        "OIDC_CLIENT_USERS": {
+            "name": "OIDC Client Users",
+            "description": "Comma separated client_id=username pairs for machine tokens (sub == azp). Env override: INVENTREE_MCP_OIDC_CLIENT_USERS.",
+            "default": "",
+        },
         "MCP_LOG_TOOL_CALLS": {
             "name": "Log Tool Calls",
             "description": "Log every MCP tool call (tool name, arguments, calling user, and outcome) to the 'inventree' logger for debugging.",
