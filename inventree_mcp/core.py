@@ -60,7 +60,7 @@ class InvenTreeMCP(WellKnownMixin, SettingsMixin, UrlsMixin, InvenTreePlugin):
         },
         "OIDC_JWKS_URL": {
             "name": "OIDC JWKS URL",
-            "description": "Signing keys URL. Empty uses jwks_uri from the issuer's discovery document. Env override: INVENTREE_MCP_OIDC_JWKS_URL.",
+            "description": "Signing keys URL. Empty uses jwks_uri from the issuer's discovery document, which needs https. Set this to fetch keys over plain http. Env override: INVENTREE_MCP_OIDC_JWKS_URL.",
             "default": "",
         },
         "OIDC_CLIENT_USERS": {

@@ -23,7 +23,9 @@ can keep them in config):
 - ``OIDC_PROVIDER``: allauth provider id whose ``SocialAccount.uid`` equals the
   token's ``sub``.
 - ``OIDC_JWKS_URL`` (optional): signing keys; defaults to ``jwks_uri`` from the
-  issuer's discovery document.
+  issuer's discovery document. Discovery needs an https issuer and an https
+  ``jwks_uri``; set this to fetch keys from a plain http address (an
+  in-cluster one, say).
 - ``OIDC_CLIENT_USERS`` (optional): ``client_id=username`` pairs for machine
   tokens (``sub == azp``, e.g. client credentials), which have no SSO link.
   Unlisted machine tokens are refused.
@@ -36,11 +38,15 @@ from __future__ import annotations
 import json
 import logging
 import os
+import threading
 import time
 import urllib.request
 from dataclasses import dataclass, field
 from typing import Any
+from urllib.parse import urlsplit
 
+import jwt
+from jwt import PyJWK, PyJWKClient
 from rest_framework import exceptions
 from rest_framework.authentication import BaseAuthentication, get_authorization_header
 
@@ -51,7 +57,9 @@ LEEWAY_SECONDS = 30
 
 _jwk_clients: dict[str, Any] = {}
 _discovery_failures: dict[str, float] = {}
+_jwk_clients_lock = threading.Lock()
 DISCOVERY_RETRY_SECONDS = 30
+KEY_REFRESH_SECONDS = 30
 
 
 @dataclass(frozen=True)
@@ -78,7 +86,9 @@ def get_config() -> OIDCConfig | None:
     """Return the OIDC settings, or None when OIDC is off (no issuer).
 
     Raises AuthenticationFailed when an issuer is set but the rest is not, so
-    a half-configured deployment refuses bearer JWTs instead of guessing.
+    a half-configured deployment refuses bearer JWTs instead of guessing. The
+    same goes for a plain http issuer without OIDC_JWKS_URL, since keys found
+    through discovery are only trusted over https.
     """
     issuer = _setting("OIDC_ISSUER")
     if not issuer:
@@ -88,6 +98,13 @@ def get_config() -> OIDCConfig | None:
     if not audience or not provider:
         logger.error(
             "MCP OIDC: OIDC_ISSUER is set but OIDC_AUDIENCE or OIDC_PROVIDER is not"
+        )
+        raise exceptions.AuthenticationFailed("OIDC authentication is misconfigured")
+    jwks_url = _setting("OIDC_JWKS_URL")
+    if not jwks_url and urlsplit(issuer).scheme != "https":
+        logger.error(
+            "MCP OIDC: keys are only discovered from an https OIDC_ISSUER; "
+            "set OIDC_JWKS_URL to fetch them over plain http"
         )
         raise exceptions.AuthenticationFailed("OIDC authentication is misconfigured")
 
@@ -101,20 +118,49 @@ def get_config() -> OIDCConfig | None:
                 "MCP OIDC: ignoring malformed OIDC_CLIENT_USERS entry %r", pair.strip()
             )
 
-    return OIDCConfig(
-        issuer, audience, provider, _setting("OIDC_JWKS_URL"), client_users
-    )
+    return OIDCConfig(issuer, audience, provider, jwks_url, client_users)
 
 
 def _jwks_url(config: OIDCConfig) -> str:
+    """Return OIDC_JWKS_URL if set, else the jwks_uri from the issuer's discovery.
+
+    An explicit OIDC_JWKS_URL may be plain http (an in-cluster address, say).
+    Anything learned through discovery has to come over https: get_config
+    already refuses an http issuer without OIDC_JWKS_URL, and the jwks_uri the
+    document names must be https too.
+    """
     if config.jwks_url:
         return config.jwks_url
     discovery = config.issuer.rstrip("/") + "/.well-known/openid-configuration"
     with urllib.request.urlopen(discovery, timeout=5) as response:
         jwks_uri = json.load(response).get("jwks_uri")
-    if not isinstance(jwks_uri, str) or not jwks_uri:
-        raise exceptions.AuthenticationFailed("OIDC discovery document has no jwks_uri")
+    if not isinstance(jwks_uri, str) or urlsplit(jwks_uri).scheme != "https":
+        raise exceptions.AuthenticationFailed(
+            "OIDC discovery document has no https jwks_uri"
+        )
     return jwks_uri
+
+
+class _JWKClient(PyJWKClient):
+    """A PyJWKClient that refreshes for an unknown ``kid`` at most every KEY_REFRESH_SECONDS.
+
+    The stock client refetches the key set on every miss, so each request
+    with a made-up ``kid`` would cost a round trip to the provider. A key the
+    provider has just rotated in is still found, KEY_REFRESH_SECONDS late at
+    worst.
+    """
+
+    _refresh_lock = threading.Lock()
+    _refreshed_at = float("-inf")
+
+    def get_signing_keys(self, refresh: bool = False) -> list[PyJWK]:
+        if refresh:
+            with self._refresh_lock:
+                now = time.monotonic()
+                refresh = now - self._refreshed_at >= KEY_REFRESH_SECONDS
+                if refresh:
+                    self._refreshed_at = now
+        return super().get_signing_keys(refresh)
 
 
 def _jwk_client(config: OIDCConfig) -> Any:
@@ -123,31 +169,41 @@ def _jwk_client(config: OIDCConfig) -> Any:
     Building it may fetch the discovery document. Any failure there (issuer
     unreachable, timeout, a malformed document) becomes a clean 401, not an
     unhandled exception, and is remembered for DISCOVERY_RETRY_SECONDS so an
-    IdP outage doesn't cost every request another blocking fetch.
+    IdP outage doesn't cost every request another blocking fetch. The build
+    runs under a lock, so requests racing on a cold cache wait for one fetch
+    instead of each starting their own.
     """
     key = config.jwks_url or config.issuer
-    if key in _jwk_clients:
-        return _jwk_clients[key]
+    client = _jwk_clients.get(key)
+    if client is not None:
+        return client
 
-    failed_at = _discovery_failures.get(key)
-    if failed_at is not None and time.monotonic() - failed_at < DISCOVERY_RETRY_SECONDS:
-        raise exceptions.AuthenticationFailed("OIDC provider unavailable")
+    with _jwk_clients_lock:
+        client = _jwk_clients.get(key)
+        if client is not None:
+            return client
 
-    from jwt import PyJWKClient
+        failed_at = _discovery_failures.get(key)
+        if (
+            failed_at is not None
+            and time.monotonic() - failed_at < DISCOVERY_RETRY_SECONDS
+        ):
+            raise exceptions.AuthenticationFailed("OIDC provider unavailable")
 
-    try:
-        jwks_url = _jwks_url(config)
-    except exceptions.AuthenticationFailed:
-        _discovery_failures[key] = time.monotonic()
-        raise
-    except Exception as exc:
-        _discovery_failures[key] = time.monotonic()
-        logger.warning("MCP OIDC discovery for %s failed: %s", config.issuer, exc)
-        raise exceptions.AuthenticationFailed("OIDC provider unavailable") from exc
+        try:
+            jwks_url = _jwks_url(config)
+        except Exception as exc:
+            _discovery_failures[key] = time.monotonic()
+            logger.warning("MCP OIDC discovery for %s failed: %s", config.issuer, exc)
+            if isinstance(exc, exceptions.AuthenticationFailed):
+                raise
+            raise exceptions.AuthenticationFailed("OIDC provider unavailable") from exc
 
-    _discovery_failures.pop(key, None)
-    _jwk_clients[key] = PyJWKClient(jwks_url, cache_keys=True, lifespan=300, timeout=5)
-    return _jwk_clients[key]
+        _discovery_failures.pop(key, None)
+        client = _jwk_clients[key] = _JWKClient(
+            jwks_url, cache_keys=True, lifespan=300, timeout=5
+        )
+        return client
 
 
 def _looks_like_jwt(token: str) -> bool:
@@ -191,8 +247,6 @@ class OIDCAuthentication(BaseAuthentication):
     def verify(
         self, token: str, config: OIDCConfig, jwk_client: Any = None
     ) -> dict[str, Any]:
-        import jwt
-
         try:
             client = jwk_client or _jwk_client(config)
             signing_key = client.get_signing_key_from_jwt(token)

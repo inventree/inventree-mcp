@@ -140,7 +140,9 @@ Configure under **Settings > Plugin Settings**. Each setting can also come from 
 - `OIDC_PROVIDER`: the allauth provider id of the SSO login (the `provider` on the linked social
   account).
 - `OIDC_JWKS_URL` (optional): where to fetch signing keys. Defaults to `jwks_uri` from the
-  issuer's discovery document.
+  issuer's discovery document. Discovery only runs over https, for both the issuer and the
+  `jwks_uri` it returns. Set this to fetch keys from a plain http address, such as an in-cluster
+  one.
 - `OIDC_CLIENT_USERS` (optional): `client_id=username` pairs, comma separated, for machine tokens.
 
 InvenTree's own OAuth2 tokens are opaque rather than JWTs, so they keep working when OIDC is on.

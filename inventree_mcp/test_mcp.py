@@ -2678,7 +2678,7 @@ class OIDCAuthenticationTest(InvenTreeTestCase):
 
 
 class OIDCDiscoveryTest(InvenTreeTestCase):
-    """3. A discovery failure is a clean 401, remembered briefly, never a 500."""
+    """How the provider's signing keys are found and fetched."""
 
     URL = "/plugin/inventree-mcp/mcp/"
     ENV: ClassVar[dict[str, str]] = {
@@ -2756,3 +2756,108 @@ class OIDCDiscoveryTest(InvenTreeTestCase):
             with self.assertRaises(exceptions.AuthenticationFailed) as cm:
                 auth.authenticate(request)
         self.assertIn("OIDC_CLIENT_USERS", str(cm.exception.detail))
+
+    def test_plain_http_keys_need_an_explicit_jwks_url(self):
+        """Discovery only runs against an https issuer; OIDC_JWKS_URL opts into plain http."""
+        from rest_framework import exceptions
+
+        from inventree_mcp import oidc
+
+        token = "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ4In0.c2ln"
+        env = {**self.ENV, "INVENTREE_MCP_OIDC_ISSUER": "http://idp.example/auth/v1/"}
+        with patch.dict("os.environ", env), patch("urllib.request.urlopen") as urlopen:
+            self.assertEqual(self._post(token).status_code, 401)
+            with self.assertRaises(exceptions.AuthenticationFailed):
+                oidc.get_config()
+            with patch.dict(
+                "os.environ",
+                {"INVENTREE_MCP_OIDC_JWKS_URL": "http://idp.internal/certs"},
+            ):
+                self.assertEqual(
+                    oidc.get_config().jwks_url, "http://idp.internal/certs"
+                )
+        urlopen.assert_not_called()
+
+    def test_discovered_jwks_uri_must_be_https(self):
+        from io import BytesIO
+
+        token = "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ4In0.c2ln"
+        document = json.dumps({"jwks_uri": "http://idp.example/certs"}).encode()
+        with (
+            patch.dict("os.environ", self.ENV),
+            patch("urllib.request.urlopen", return_value=BytesIO(document)) as urlopen,
+        ):
+            self.assertEqual(self._post(token).status_code, 401)
+        # The discovery document was read, the http key set never was.
+        self.assertEqual(urlopen.call_count, 1)
+
+    def test_concurrent_cold_requests_share_one_discovery_fetch(self):
+        """Requests racing on a cold cache wait for one discovery fetch, not one each."""
+        import threading
+        import time
+        from io import BytesIO
+
+        from inventree_mcp import oidc
+
+        document = json.dumps({"jwks_uri": "https://idp.example/certs"}).encode()
+
+        def slow_discovery(*args: Any, **kwargs: Any) -> BytesIO:
+            time.sleep(0.2)
+            return BytesIO(document)
+
+        with patch.dict("os.environ", self.ENV):
+            config = oidc.get_config()
+        start = threading.Barrier(4)
+        clients: list[Any] = []
+
+        def build() -> None:
+            start.wait()
+            clients.append(oidc._jwk_client(config))
+
+        with patch("urllib.request.urlopen", side_effect=slow_discovery) as urlopen:
+            threads = [threading.Thread(target=build) for _ in range(4)]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+        self.assertEqual(urlopen.call_count, 1)
+        self.assertEqual(len(clients), 4)
+        self.assertEqual(len({id(client) for client in clients}), 1)
+
+    def test_unknown_kids_refresh_the_key_set_at_most_once_per_cooldown(self):
+        """PyJWKClient refetches for every unknown kid; ours once per KEY_REFRESH_SECONDS."""
+        from io import BytesIO
+
+        import jwt
+        from cryptography.hazmat.primitives.asymmetric import rsa
+        from jwt.algorithms import RSAAlgorithm
+
+        from inventree_mcp import oidc
+
+        key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        jwk = json.loads(RSAAlgorithm.to_jwk(key.public_key()))
+        key_set = json.dumps({"keys": [{**jwk, "kid": "real"}]}).encode()
+
+        def token(kid: str) -> str:
+            return jwt.encode(
+                {"sub": "x"}, key, algorithm="RS256", headers={"kid": kid}
+            )
+
+        client = oidc._JWKClient("https://idp.example/certs", cache_keys=True)
+        with patch(
+            "urllib.request.urlopen", side_effect=lambda *a, **k: BytesIO(key_set)
+        ) as urlopen:
+            client.get_signing_key_from_jwt(token("real"))
+            for kid in ("made-up-1", "made-up-2", "made-up-3"):
+                with self.assertRaises(jwt.PyJWKClientError):
+                    client.get_signing_key_from_jwt(token(kid))
+            # The first fetch, then a single refresh for all three misses.
+            self.assertEqual(urlopen.call_count, 2)
+
+            # Once the cooldown is over, an unknown kid may refresh again.
+            with (
+                patch.object(oidc, "KEY_REFRESH_SECONDS", 0),
+                self.assertRaises(jwt.PyJWKClientError),
+            ):
+                client.get_signing_key_from_jwt(token("made-up-4"))
+            self.assertEqual(urlopen.call_count, 3)
