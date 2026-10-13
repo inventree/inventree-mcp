@@ -35,6 +35,7 @@ Only asymmetric algorithms are accepted.
 
 from __future__ import annotations
 
+import http.client
 import json
 import logging
 import os
@@ -206,6 +207,26 @@ def _jwk_client(config: OIDCConfig) -> Any:
         return client
 
 
+def _signing_key(client: Any, token: str) -> Any:
+    """Look up the key that signed *token*, fetching the key set if needed.
+
+    PyJWT wraps an unreachable endpoint in PyJWKClientConnectionError but lets
+    a reset connection or a key set that isn't JSON escape as they are. Either
+    way the provider failed rather than the token, so both get the same 401 as
+    a failed discovery.
+    """
+    try:
+        return client.get_signing_key_from_jwt(token)
+    except (
+        jwt.PyJWKClientConnectionError,
+        OSError,
+        ValueError,
+        http.client.HTTPException,
+    ) as exc:
+        logger.warning("MCP OIDC: fetching signing keys failed: %s", exc)
+        raise exceptions.AuthenticationFailed("OIDC provider unavailable") from exc
+
+
 def _looks_like_jwt(token: str) -> bool:
     return token.count(".") == 2
 
@@ -249,7 +270,7 @@ class OIDCAuthentication(BaseAuthentication):
     ) -> dict[str, Any]:
         try:
             client = jwk_client or _jwk_client(config)
-            signing_key = client.get_signing_key_from_jwt(token)
+            signing_key = _signing_key(client, token)
             return jwt.decode(
                 token,
                 signing_key.key,

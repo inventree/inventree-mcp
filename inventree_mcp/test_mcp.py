@@ -2861,3 +2861,31 @@ class OIDCDiscoveryTest(InvenTreeTestCase):
             ):
                 client.get_signing_key_from_jwt(token("made-up-4"))
             self.assertEqual(urlopen.call_count, 3)
+
+    def test_key_set_fetch_failures_are_a_401(self):
+        """However fetching the key set fails, the caller gets a 401, never a 500."""
+        import urllib.error
+        from io import BytesIO
+
+        from inventree_mcp import oidc
+
+        token = "eyJhbGciOiJSUzI1NiIsImtpZCI6ImsxIn0.eyJzdWIiOiJ4In0.c2ln"  # kid k1
+        env = {**self.ENV, "INVENTREE_MCP_OIDC_JWKS_URL": "https://idp.example/certs"}
+        cases = {
+            "key set is not JSON": {"return_value": BytesIO(b"<html>Sign in</html>")},
+            "connection reset": {"side_effect": ConnectionResetError("reset by peer")},
+            "provider unreachable": {"side_effect": urllib.error.URLError("down")},
+        }
+        for label, urlopen in cases.items():
+            with self.subTest(label):
+                oidc._jwk_clients.clear()
+                with (
+                    patch.dict("os.environ", env),
+                    patch("urllib.request.urlopen", **urlopen),
+                ):
+                    response = self._post(token)
+                self.assertEqual(response.status_code, 401)
+                self.assertEqual(
+                    json.loads(response.content)["error"]["message"],
+                    "OIDC provider unavailable",
+                )
