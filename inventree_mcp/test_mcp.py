@@ -58,13 +58,12 @@ from stock.models import (
 )
 from users.models import ApiToken
 
-from . import PLUGIN_VERSION, context, tool_visibility, view_resolution
+from . import PLUGIN_VERSION, context, settings, tool_visibility, view_resolution
 from .filter_introspection import _default_ordering_fields
 from .mcp_server import mcp
 from .proxy import call_view
 from .schema_introspection import paginated_schema, serializer_schema
 from .server_card import SERVER_CARD_SCHEMA, build_server_card
-from .settings import get_plugin_setting
 from .tools import discovery
 from .tools._common import DEFAULT_LIMIT, MAX_LIMIT, build_query_params, clamp_limit
 from .tools.attachments import get_attachment, list_attachments
@@ -1386,8 +1385,9 @@ class ViewResolutionTest(unittest.TestCase):
         self.assertIsNone(view_resolution.resolve_view("not.a.real.module", "Whatever"))
 
     def test_caches_a_failure_without_re_importing(self):
-        with patch(
-            "inventree_mcp.view_resolution.import_module",
+        with patch.object(
+            view_resolution,
+            "import_module",
             side_effect=ImportError("boom"),
         ) as mock_import:
             self.assertIsNone(view_resolution.resolve_view("some.fake.module", "X"))
@@ -1442,8 +1442,9 @@ class ResolveViewAnyTest(unittest.TestCase):
         )
 
     def test_caches_a_total_failure_without_re_importing(self):
-        with patch(
-            "inventree_mcp.view_resolution.import_module",
+        with patch.object(
+            view_resolution,
+            "import_module",
             side_effect=ImportError("boom"),
         ) as mock_import:
             self.assertIsNone(
@@ -2291,27 +2292,26 @@ class PluginSettingsTest(InvenTreeTestCase):
     """
 
     def test_returns_default_when_plugin_unresolvable(self):
-        with patch("inventree_mcp.settings._get_plugin_instance", return_value=None):
-            self.assertTrue(get_plugin_setting("REQUIRE_AUTH"))
-            self.assertTrue(get_plugin_setting("MCP_READ_ONLY"))
+        with patch.object(settings, "_get_plugin_instance", return_value=None):
+            self.assertTrue(settings.get_plugin_setting("REQUIRE_AUTH"))
+            self.assertTrue(settings.get_plugin_setting("MCP_READ_ONLY"))
             # The default parameter itself must be respected, not hardcoded True.
-            self.assertFalse(get_plugin_setting("REQUIRE_AUTH", default=False))
+            self.assertFalse(settings.get_plugin_setting("REQUIRE_AUTH", default=False))
 
     def test_returns_default_when_setting_lookup_raises(self):
         class _BrokenPlugin:
             def get_setting(self, key):
                 raise RuntimeError("simulated failure")
 
-        with patch(
-            "inventree_mcp.settings._get_plugin_instance",
-            return_value=_BrokenPlugin(),
+        with patch.object(
+            settings, "_get_plugin_instance", return_value=_BrokenPlugin()
         ):
-            self.assertTrue(get_plugin_setting("REQUIRE_AUTH"))
+            self.assertTrue(settings.get_plugin_setting("REQUIRE_AUTH"))
 
     def test_returns_real_value_when_plugin_resolvable(self):
-        with patch("inventree_mcp.settings._get_plugin_instance") as mock_get:
+        with patch.object(settings, "_get_plugin_instance") as mock_get:
             mock_get.return_value.get_setting.return_value = False
-            self.assertFalse(get_plugin_setting("MCP_READ_ONLY"))
+            self.assertFalse(settings.get_plugin_setting("MCP_READ_ONLY"))
 
 
 class ClampLimitTest(unittest.TestCase):
