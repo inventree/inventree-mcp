@@ -47,6 +47,7 @@ from users.authentication import ApiTokenAuthentication, ExtendedOAuth2Authentic
 
 from .context import reset_current_user, set_current_user
 from .mcp_server import mcp
+from .oidc import OIDCAuthentication
 from .settings import get_plugin_setting
 
 if TYPE_CHECKING:
@@ -169,6 +170,7 @@ class MCPView(APIView):
     authentication_classes: ClassVar[list] = [
         ApiTokenAuthentication,
         BasicAuthentication,
+        OIDCAuthentication,
         ExtendedOAuth2Authentication,
     ]
     permission_classes: ClassVar[list] = []

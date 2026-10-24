@@ -24,6 +24,8 @@ duplicate the check per-tool or bypass `call_view()`.
   `MCP_READ_ONLY`).
 - `mcp_server.py` - the `MCPServer` instance; imports `tools/*` for their `@mcp.tool()` side effect.
 - `mcp_transport.py` - Django view bridging Streamable HTTP onto the MCP server.
+- `oidc.py` - `OIDCAuthentication`: bearer JWTs from an external OpenID provider, mapped to users
+  through their allauth SSO link (off unless `OIDC_ISSUER` is set).
 - `oauth2_bridge.py` - lets `call_view()` present an OAuth2-authenticated request's real token to
   the proxied view, and works around upstream InvenTree OAuth2 scope-enforcement bugs.
 - `tools/` - one module per resource, each a thin async wrapper around `call_view()`;

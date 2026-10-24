@@ -2510,3 +2510,382 @@ class WellKnownCompatTest(unittest.TestCase):
         finally:
             plugin_mixins.WellKnownMixin = real_mixin
             importlib.reload(_well_known_compat)
+
+
+class OIDCAuthenticationTest(InvenTreeTestCase):
+    """Bearer JWTs from an external OpenID provider, mapped through allauth SSO links.
+
+    Signs real RS256 tokens and drives MCPView over HTTP; only the JWKS fetch
+    is stubbed (it would otherwise need a live identity provider).
+    """
+
+    URL = "/plugin/inventree-mcp/mcp/"
+    ISSUER = "https://idp.example/auth/v1/"
+    AUDIENCE = "https://gateway.example/mcp/inventree"
+    ENV: ClassVar[dict[str, str]] = {
+        "INVENTREE_MCP_OIDC_ISSUER": ISSUER,
+        "INVENTREE_MCP_OIDC_AUDIENCE": AUDIENCE,
+        "INVENTREE_MCP_OIDC_PROVIDER": "testidp",
+        "INVENTREE_MCP_OIDC_JWKS_URL": "http://idp.internal/certs",
+    }
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        from allauth.socialaccount.models import SocialAccount
+        from cryptography.hazmat.primitives.asymmetric import rsa
+
+        cls.key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        SocialAccount.objects.create(
+            user=cls.user, provider="testidp", uid="sub-linked"
+        )
+        registry.reload_plugins(full_reload=True, collect=True)
+        registry.set_plugin_state("inventree-mcp", True)
+
+    def setUp(self):
+        super().setUp()
+        from types import SimpleNamespace
+
+        public = self.key.public_key()
+        fake_client = SimpleNamespace(
+            get_signing_key_from_jwt=lambda token: SimpleNamespace(key=public)
+        )
+        env = patch.dict("os.environ", self.ENV)
+        jwks = patch("inventree_mcp.oidc._jwk_client", return_value=fake_client)
+        env.start()
+        jwks.start()
+        self.addCleanup(env.stop)
+        self.addCleanup(jwks.stop)
+
+    def _token(self, key: Any = None, **overrides: Any) -> str:
+        import jwt
+
+        now = int(timezone.now().timestamp())
+        claims: dict[str, Any] = {
+            "iss": self.ISSUER,
+            "aud": ["gateway-client", self.AUDIENCE],
+            "sub": "sub-linked",
+            "azp": "gateway-client",
+            "iat": now,
+            "exp": now + 300,
+        }
+        claims.update(overrides)
+        claims = {k: v for k, v in claims.items() if v is not None}
+        return jwt.encode(
+            claims, key or self.key, algorithm="RS256", headers={"kid": "k1"}
+        )
+
+    def _post(
+        self, token: str, method: str = "initialize", params: dict | None = None
+    ) -> Any:
+        body: dict[str, Any] = {"jsonrpc": "2.0", "id": 1, "method": method}
+        if method == "initialize":
+            body["params"] = {
+                "protocolVersion": "2025-06-18",
+                "capabilities": {},
+                "clientInfo": {"name": "test", "version": "0.1"},
+            }
+        elif params is not None:
+            body["params"] = params
+        return Client(enforce_csrf_checks=True).post(
+            self.URL,
+            data=json.dumps(body),
+            content_type="application/json",
+            HTTP_ACCEPT="application/json, text/event-stream",
+            HTTP_AUTHORIZATION=f"Bearer {token}",
+        )
+
+    def test_linked_subject_authenticates_as_its_user(self):
+        response = self._post(self._token())
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            json.loads(response.content)["result"]["serverInfo"]["name"],
+            "InvenTree MCP",
+        )
+
+    def test_tools_run_as_the_linked_user(self):
+        """The mapped user's roles decide what a tool may see, as for token auth."""
+        self.assignRole("part.view")
+        response = self._post(
+            self._token(),
+            "tools/call",
+            {"name": "list_parts", "arguments": {"limit": 1}},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(json.loads(response.content)["result"].get("isError"))
+
+    def test_rejected_tokens(self):
+        from cryptography.hazmat.primitives.asymmetric import rsa
+
+        now = int(timezone.now().timestamp())
+        cases = {
+            "other audience": self._token(
+                aud=["gateway-client", "https://gateway.example/mcp/other"]
+            ),
+            "issuer without trailing slash": self._token(iss=self.ISSUER.rstrip("/")),
+            "expired": self._token(iat=now - 900, exp=now - 300),
+            "no sub": self._token(sub=None),
+            "wrong signing key": self._token(
+                key=rsa.generate_private_key(public_exponent=65537, key_size=2048)
+            ),
+            "unlinked subject": self._token(sub="sub-stranger"),
+            "machine token without mapping": self._token(sub="gateway-client"),
+        }
+        for label, token in cases.items():
+            with self.subTest(label):
+                self.assertEqual(self._post(token).status_code, 401)
+
+    def test_machine_token_maps_through_client_users(self):
+        with patch.dict(
+            "os.environ",
+            {"INVENTREE_MCP_OIDC_CLIENT_USERS": f"gateway-client={self.user.username}"},
+        ):
+            response = self._post(self._token(sub="gateway-client"))
+        self.assertEqual(response.status_code, 200)
+
+    def test_inactive_linked_user_rejected(self):
+        self.user.is_active = False
+        self.user.save()
+        self.assertEqual(self._post(self._token()).status_code, 401)
+
+    def test_off_without_issuer(self):
+        """With no issuer configured a JWT is not an OIDC credential at all."""
+        with patch.dict("os.environ", {"INVENTREE_MCP_OIDC_ISSUER": ""}):
+            self.assertEqual(self._post(self._token()).status_code, 401)
+
+    def test_half_configured_fails_closed(self):
+        with patch.dict("os.environ", {"INVENTREE_MCP_OIDC_AUDIENCE": ""}):
+            self.assertEqual(self._post(self._token()).status_code, 401)
+
+    def test_opaque_bearer_still_reaches_oauth2(self):
+        """InvenTree's own OAuth2 access tokens are not JWTs and keep working with OIDC on."""
+        app, _ = Application.objects.get_or_create(
+            name="mcp-oidc-test-app",
+            defaults={
+                "client_type": "confidential",
+                "authorization_grant_type": "client-credentials",
+                "user": self.user,
+            },
+        )
+        token = AccessToken.objects.create(
+            user=self.user,
+            application=app,
+            token="mcp-oidc-opaque-token",
+            expires=timezone.now() + datetime.timedelta(hours=1),
+            scope="g:read",
+        ).token
+        self.assertEqual(self._post(token).status_code, 200)
+
+
+class OIDCDiscoveryTest(InvenTreeTestCase):
+    """How the provider's signing keys are found and fetched."""
+
+    URL = "/plugin/inventree-mcp/mcp/"
+    ENV: ClassVar[dict[str, str]] = {
+        "INVENTREE_MCP_OIDC_ISSUER": "https://unreachable.example/auth/v1/",
+        "INVENTREE_MCP_OIDC_AUDIENCE": "https://gateway.example/mcp",
+        "INVENTREE_MCP_OIDC_PROVIDER": "testidp",
+    }
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        registry.reload_plugins(full_reload=True, collect=True)
+        registry.set_plugin_state("inventree-mcp", True)
+
+    def setUp(self):
+        super().setUp()
+        from inventree_mcp import oidc
+
+        oidc._jwk_clients.clear()
+        oidc._discovery_failures.clear()
+        self.addCleanup(oidc._jwk_clients.clear)
+        self.addCleanup(oidc._discovery_failures.clear)
+
+    def _post(self, token: str) -> Any:
+        return Client(enforce_csrf_checks=True).post(
+            self.URL,
+            data=json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}),
+            content_type="application/json",
+            HTTP_ACCEPT="application/json, text/event-stream",
+            HTTP_AUTHORIZATION=f"Bearer {token}",
+        )
+
+    def test_unreachable_issuer_is_a_401_and_is_not_refetched(self):
+        import urllib.error
+
+        token = "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ4In0.c2ln"  # JWT-shaped
+        with (
+            patch.dict("os.environ", self.ENV),
+            patch(
+                "urllib.request.urlopen", side_effect=urllib.error.URLError("down")
+            ) as urlopen,
+        ):
+            first = self._post(token)
+            second = self._post(token)
+        self.assertEqual(first.status_code, 401)
+        self.assertEqual(second.status_code, 401)
+        self.assertIn("error", json.loads(first.content))
+        self.assertEqual(urlopen.call_count, 1)
+
+    def test_malformed_discovery_document_is_a_401(self):
+        from io import BytesIO
+
+        token = "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ4In0.c2ln"
+        with (
+            patch.dict("os.environ", self.ENV),
+            patch("urllib.request.urlopen", return_value=BytesIO(b"<html>not json")),
+        ):
+            self.assertEqual(self._post(token).status_code, 401)
+
+    def test_missing_mapped_machine_user_gets_its_own_message(self):
+        from inventree_mcp.oidc import OIDCAuthentication, OIDCConfig
+
+        config = OIDCConfig(
+            "https://i/", "aud", "testidp", client_users={"bot": "nobody-here"}
+        )
+        auth = OIDCAuthentication()
+        with (
+            patch.object(auth, "verify", return_value={"sub": "bot", "azp": "bot"}),
+            patch("inventree_mcp.oidc.get_config", return_value=config),
+        ):
+            from rest_framework import exceptions
+            from rest_framework.test import APIRequestFactory
+
+            request = APIRequestFactory().post("/", HTTP_AUTHORIZATION="Bearer a.b.c")
+            with self.assertRaises(exceptions.AuthenticationFailed) as cm:
+                auth.authenticate(request)
+        self.assertIn("OIDC_CLIENT_USERS", str(cm.exception.detail))
+
+    def test_plain_http_keys_need_an_explicit_jwks_url(self):
+        """Discovery only runs against an https issuer; OIDC_JWKS_URL opts into plain http."""
+        from rest_framework import exceptions
+
+        from inventree_mcp import oidc
+
+        token = "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ4In0.c2ln"
+        env = {**self.ENV, "INVENTREE_MCP_OIDC_ISSUER": "http://idp.example/auth/v1/"}
+        with patch.dict("os.environ", env), patch("urllib.request.urlopen") as urlopen:
+            self.assertEqual(self._post(token).status_code, 401)
+            with self.assertRaises(exceptions.AuthenticationFailed):
+                oidc.get_config()
+            with patch.dict(
+                "os.environ",
+                {"INVENTREE_MCP_OIDC_JWKS_URL": "http://idp.internal/certs"},
+            ):
+                self.assertEqual(
+                    oidc.get_config().jwks_url, "http://idp.internal/certs"
+                )
+        urlopen.assert_not_called()
+
+    def test_discovered_jwks_uri_must_be_https(self):
+        from io import BytesIO
+
+        token = "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ4In0.c2ln"
+        document = json.dumps({"jwks_uri": "http://idp.example/certs"}).encode()
+        with (
+            patch.dict("os.environ", self.ENV),
+            patch("urllib.request.urlopen", return_value=BytesIO(document)) as urlopen,
+        ):
+            self.assertEqual(self._post(token).status_code, 401)
+        # The discovery document was read, the http key set never was.
+        self.assertEqual(urlopen.call_count, 1)
+
+    def test_concurrent_cold_requests_share_one_discovery_fetch(self):
+        """Requests racing on a cold cache wait for one discovery fetch, not one each."""
+        import threading
+        import time
+        from io import BytesIO
+
+        from inventree_mcp import oidc
+
+        document = json.dumps({"jwks_uri": "https://idp.example/certs"}).encode()
+
+        def slow_discovery(*args: Any, **kwargs: Any) -> BytesIO:
+            time.sleep(0.2)
+            return BytesIO(document)
+
+        with patch.dict("os.environ", self.ENV):
+            config = oidc.get_config()
+        start = threading.Barrier(4)
+        clients: list[Any] = []
+
+        def build() -> None:
+            start.wait()
+            clients.append(oidc._jwk_client(config))
+
+        with patch("urllib.request.urlopen", side_effect=slow_discovery) as urlopen:
+            threads = [threading.Thread(target=build) for _ in range(4)]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+        self.assertEqual(urlopen.call_count, 1)
+        self.assertEqual(len(clients), 4)
+        self.assertEqual(len({id(client) for client in clients}), 1)
+
+    def test_unknown_kids_refresh_the_key_set_at_most_once_per_cooldown(self):
+        """PyJWKClient refetches for every unknown kid; ours once per KEY_REFRESH_SECONDS."""
+        from io import BytesIO
+
+        import jwt
+        from cryptography.hazmat.primitives.asymmetric import rsa
+        from jwt.algorithms import RSAAlgorithm
+
+        from inventree_mcp import oidc
+
+        key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        jwk = json.loads(RSAAlgorithm.to_jwk(key.public_key()))
+        key_set = json.dumps({"keys": [{**jwk, "kid": "real"}]}).encode()
+
+        def token(kid: str) -> str:
+            return jwt.encode(
+                {"sub": "x"}, key, algorithm="RS256", headers={"kid": kid}
+            )
+
+        client = oidc._JWKClient("https://idp.example/certs", cache_keys=True)
+        with patch(
+            "urllib.request.urlopen", side_effect=lambda *a, **k: BytesIO(key_set)
+        ) as urlopen:
+            client.get_signing_key_from_jwt(token("real"))
+            for kid in ("made-up-1", "made-up-2", "made-up-3"):
+                with self.assertRaises(jwt.PyJWKClientError):
+                    client.get_signing_key_from_jwt(token(kid))
+            # The first fetch, then a single refresh for all three misses.
+            self.assertEqual(urlopen.call_count, 2)
+
+            # Once the cooldown is over, an unknown kid may refresh again.
+            with (
+                patch.object(oidc, "KEY_REFRESH_SECONDS", 0),
+                self.assertRaises(jwt.PyJWKClientError),
+            ):
+                client.get_signing_key_from_jwt(token("made-up-4"))
+            self.assertEqual(urlopen.call_count, 3)
+
+    def test_key_set_fetch_failures_are_a_401(self):
+        """However fetching the key set fails, the caller gets a 401, never a 500."""
+        import urllib.error
+        from io import BytesIO
+
+        from inventree_mcp import oidc
+
+        token = "eyJhbGciOiJSUzI1NiIsImtpZCI6ImsxIn0.eyJzdWIiOiJ4In0.c2ln"  # kid k1
+        env = {**self.ENV, "INVENTREE_MCP_OIDC_JWKS_URL": "https://idp.example/certs"}
+        cases = {
+            "key set is not JSON": {"return_value": BytesIO(b"<html>Sign in</html>")},
+            "connection reset": {"side_effect": ConnectionResetError("reset by peer")},
+            "provider unreachable": {"side_effect": urllib.error.URLError("down")},
+        }
+        for label, urlopen in cases.items():
+            with self.subTest(label):
+                oidc._jwk_clients.clear()
+                with (
+                    patch.dict("os.environ", env),
+                    patch("urllib.request.urlopen", **urlopen),
+                ):
+                    response = self._post(token)
+                self.assertEqual(response.status_code, 401)
+                self.assertEqual(
+                    json.loads(response.content)["error"]["message"],
+                    "OIDC provider unavailable",
+                )
