@@ -56,6 +56,8 @@ from typing import Any
 from InvenTree.permissions import (
     InvenTreeRoleScopeMixin,
     InvenTreeTokenMatchesOASRequirements,
+    OASTokenMixin,
+    map_scope,
 )
 from rest_framework.settings import api_settings
 from users.authentication import ExtendedOAuth2Authentication
@@ -95,6 +97,34 @@ def _fixed_permission_classes(view_cls: type) -> list[type]:
     ]
 
 
+def _required_alternate_scopes(view_cls: type) -> dict:
+    """Pre-compute the OAuth2 scopes a request to view_cls must carry.
+
+    Normally the role-derived scopes InvenTreeRoleScopeMixin would compute.
+    But for a model with no role mapping that resolver falls back to the
+    generic read scope ("g:read"), which would be *looser* than what some
+    views' own permission class demands - e.g. the audit log's
+    IsAdminOrAdminScope requires "a:staff". In that case, defer to the
+    first OAuth2-aware, non-role-based permission class on the view, if it
+    declares its own scopes.
+    """
+    view = view_cls()
+    role_scopes = _scope_resolver.get_required_alternate_scopes(None, view)
+
+    if role_scopes != map_scope(only_read=True):
+        return role_scopes
+
+    for cls in getattr(view_cls, "permission_classes", None) or []:
+        if (
+            issubclass(cls, OASTokenMixin)
+            and not issubclass(cls, InvenTreeRoleScopeMixin)
+            and hasattr(cls, "get_required_alternate_scopes")
+        ):
+            return cls().get_required_alternate_scopes(None, view)
+
+    return role_scopes
+
+
 def scoped_view_class(view_cls: type) -> type:
     """Return a subclass of view_cls with the OAuth2 scope-check workarounds applied.
 
@@ -103,9 +133,7 @@ def scoped_view_class(view_cls: type) -> type:
     being cleanly denied when the scope doesn't match (bug 2) - see the
     module docstring.
     """
-    required_alternate_scopes = _scope_resolver.get_required_alternate_scopes(
-        None, view_cls()
-    )
+    required_alternate_scopes = _required_alternate_scopes(view_cls)
     return type(
         f"_ScopeWorkaround_{view_cls.__name__}",
         (view_cls,),

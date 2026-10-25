@@ -74,6 +74,30 @@ from .schema_introspection import paginated_schema, serializer_schema
 
 _PERMISSIVE_OUTPUT_MODEL = RootModel[dict[str, Any]]
 
+
+def _audit_log_schemas() -> dict[str, dict[str, Any]]:
+    """Output schemas for the audit log tools, tolerating an older InvenTree core.
+
+    Unlike every other serializer above, the 'audit' app only exists from
+    InvenTree 1.7.0 - a module-level import would break plugin load
+    entirely on older versions. Fall back to an unconstrained object schema
+    there; the tools themselves report as unavailable (see
+    tools/audit_log.py).
+    """
+    try:
+        from audit.serializers import AuditLogEntrySerializer
+    except ImportError:
+        return {
+            "list_audit_log": {"type": "object"},
+            "get_audit_log_entry": {"type": "object"},
+        }
+
+    return {
+        "list_audit_log": paginated_schema(AuditLogEntrySerializer),
+        "get_audit_log_entry": serializer_schema(AuditLogEntrySerializer),
+    }
+
+
 _OUTPUT_SCHEMAS = {
     "list_parts": paginated_schema(PartSerializer),
     "get_part": serializer_schema(PartSerializer),
@@ -129,6 +153,7 @@ _OUTPUT_SCHEMAS = {
     "get_stock_test_result": serializer_schema(StockItemTestResultSerializer),
     "list_project_codes": paginated_schema(ProjectCodeSerializer),
     "get_project_code": serializer_schema(ProjectCodeSerializer),
+    **_audit_log_schemas(),
     "make_web_link": {
         "type": "object",
         "properties": {

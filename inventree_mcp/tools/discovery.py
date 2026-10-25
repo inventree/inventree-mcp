@@ -127,6 +127,12 @@ def _project_code_list() -> type | None:
     return resolve_view("common.api", "ProjectCodeList")
 
 
+def _audit_log_list() -> type | None:
+    # The 'audit' app only exists from InvenTree 1.7.0 - on older cores this
+    # resolves to None (the ImportError is caught by resolve_view()).
+    return resolve_view("audit.api", "AuditLogViewSet")
+
+
 # Values are loader functions, not the view classes directly, so each import
 # stays lazy (matches tools/*.py's own per-call imports) - importing e.g.
 # part.api at module level risks AppRegistryNotReady if InvenTree's plugin
@@ -167,6 +173,7 @@ RESOURCE_LOADERS = {
     "stock_tracking": _stock_tracking_list,
     "stock_test_result": _stock_test_result_list,
     "project_code": _project_code_list,
+    "audit_log": _audit_log_list,
 }
 
 
@@ -190,7 +197,8 @@ def describe_filters(resource: str) -> dict:
             "manufacturer_part", "supplier_part", "bom_item",
             "bom_substitute", "attachment", "parameter",
             "parameter_template", "return_order", "return_order_line",
-            "stock_tracking", "stock_test_result", "project_code" -
+            "stock_tracking", "stock_test_result", "project_code",
+            "audit_log" -
             matches list_parts / list_stock_items / list_locations /
             list_categories / list_purchase_orders /
             list_purchase_order_lines / list_sales_orders /
@@ -202,7 +210,7 @@ def describe_filters(resource: str) -> dict:
             list_parameters / list_parameter_templates /
             list_return_orders / list_return_order_lines /
             list_stock_tracking / list_stock_test_results /
-            list_project_codes (and each list_* tool's get_* counterpart -
+            list_project_codes / list_audit_log (and each list_* tool's get_* counterpart -
             optional_fields below applies to both).
 
     Returns a dict with:

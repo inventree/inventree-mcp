@@ -41,7 +41,7 @@ from typing import TYPE_CHECKING
 from mcp.types import ListToolsResult, PaginatedRequestParams
 
 from . import proxy
-from .context import has_bound_identity
+from .context import get_current_user, has_bound_identity
 from .mcp_server import mcp
 from .tools.discovery import RESOURCE_LOADERS
 
@@ -114,7 +114,22 @@ _TOOL_RESOURCES: dict[str, str] = {
     "get_stock_test_result": "stock_test_result",
     "list_project_codes": "project_code",
     "get_project_code": "project_code",
+    "list_audit_log": "audit_log",
+    "get_audit_log_entry": "audit_log",
 }
+
+# Resources whose tools are additionally restricted to staff users, mirroring
+# the explicit staff check in the tools themselves (see tools/audit_log.py's
+# _require_staff()) - the underlying view's own permission check alone would
+# also admit a non-staff user holding an 'a:staff'-scoped OAuth2 token.
+_STAFF_ONLY_RESOURCES: frozenset[str] = frozenset({"audit_log"})
+
+
+def _is_staff() -> bool:
+    try:
+        return bool(get_current_user().is_staff)
+    except PermissionError:
+        return False
 
 
 async def visible_tool_names(names: Iterable[str]) -> set[str]:
@@ -154,8 +169,10 @@ async def visible_tool_names(names: Iterable[str]) -> set[str]:
 
         if resource not in resource_access:
             view_cls = RESOURCE_LOADERS[resource]()
-            resource_access[resource] = view_cls is not None and (
-                await proxy.user_has_access(view_cls, "GET")
+            resource_access[resource] = (
+                view_cls is not None
+                and (resource not in _STAFF_ONLY_RESOURCES or _is_staff())
+                and await proxy.user_has_access(view_cls, "GET")
             )
 
         if resource_access[resource]:
