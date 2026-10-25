@@ -72,6 +72,14 @@ def _filter_info(f: df.Filter) -> dict[str, Any]:
         info["label"] = str(f.label)
 
     choices = getattr(f, "extra", {}).get("choices")
+    if callable(choices):
+        # Django evaluates callable choices with no arguments - e.g. the
+        # audit log's model_type filter, whose choices depend on which
+        # models are registered for auditing.
+        try:
+            choices = choices()
+        except TypeError:
+            choices = None
     if choices:
         info["choices"] = [value for value, _display in choices]
 

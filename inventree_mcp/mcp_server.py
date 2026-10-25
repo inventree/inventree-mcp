@@ -51,6 +51,7 @@ mcp = MCPServer(
 from . import output_schemas, tool_logging, tool_visibility
 from .tools import (  # noqa: F401
     attachments,
+    audit_log,
     bom,
     build_orders,
     categories,

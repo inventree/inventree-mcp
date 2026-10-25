@@ -58,6 +58,12 @@ from stock.models import (
 )
 from users.models import ApiToken
 
+try:
+    # The audit app only exists from InvenTree 1.7.0 (core PR #13069)
+    from audit.models import AuditLogEntry
+except ImportError:
+    AuditLogEntry = None
+
 from . import PLUGIN_VERSION, context, settings, tool_visibility, view_resolution
 from .filter_introspection import _default_ordering_fields
 from .mcp_server import mcp
@@ -67,6 +73,7 @@ from .server_card import SERVER_CARD_SCHEMA, build_server_card
 from .tools import discovery
 from .tools._common import DEFAULT_LIMIT, MAX_LIMIT, build_query_params, clamp_limit
 from .tools.attachments import get_attachment, list_attachments
+from .tools.audit_log import get_audit_log_entry, list_audit_log
 from .tools.bom import (
     get_bom_item,
     get_bom_substitute,
@@ -2510,3 +2517,231 @@ class WellKnownCompatTest(unittest.TestCase):
         finally:
             plugin_mixins.WellKnownMixin = real_mixin
             importlib.reload(_well_known_compat)
+
+
+@unittest.skipIf(AuditLogEntry is None, "audit log requires InvenTree 1.7.0+")
+@override_settings(PLUGIN_TESTING_SETUP=True)
+class AuditLogToolTest(InvenTreeTestCase):
+    """Verify the audit log tools are restricted to staff users.
+
+    cls.user is staff (InvenTreeTestCase default), with the 'part.view' role
+    so it may also see entries for audited Part records.
+    """
+
+    roles: ClassVar[list[str]] = ["part.view"]
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+
+        cls.part = Part.objects.create(name="Audited Part", description="MCP audit")
+
+        # Created directly, rather than relying on the audit signal handlers -
+        # these tests are about access to entries, not about recording them.
+        cls.entry = AuditLogEntry.objects.create(
+            content_type=ContentType.objects.get_for_model(Part),
+            object_pk=str(cls.part.pk),
+            object_id=cls.part.pk,
+            object_repr=str(cls.part),
+            action=AuditLogEntry.Action.UPDATE,
+            changes={"description": ["old", "MCP audit"]},
+            actor=cls.user,
+        )
+
+        # Holds the same role as cls.user, but is not staff
+        cls.non_staff_user = get_user_model().objects.create_user(
+            username="audit_non_staff",
+            password="password",
+            email="audit-non-staff@example.org",
+        )
+        cls.non_staff_user.groups.add(cls.group)
+
+        app, _ = Application.objects.get_or_create(
+            name="mcp-audit-test-app",
+            defaults={
+                "client_type": "confidential",
+                "authorization_grant_type": "client-credentials",
+                "user": cls.user,
+            },
+        )
+        expires = timezone.now() + datetime.timedelta(hours=1)
+
+        def _token(user, token, scope):
+            return AccessToken.objects.create(
+                user=user, application=app, token=token, expires=expires, scope=scope
+            )
+
+        cls.staff_token_staff = _token(cls.user, "mcp-audit-staff-staff", "a:staff")
+        cls.non_staff_token_read = _token(
+            cls.non_staff_user, "mcp-audit-nonstaff-read", "g:read"
+        )
+        cls.non_staff_token_staff = _token(
+            cls.non_staff_user, "mcp-audit-nonstaff-staff", "a:staff g:read"
+        )
+
+    def _as(self, user, oauth2_token=None):
+        context.set_current_user(user, oauth2_token=oauth2_token)
+        self.addCleanup(context.set_current_user, None)
+
+    async def _visible(self):
+        return await tool_visibility.visible_tool_names(
+            tool.name for tool in await mcp.list_tools()
+        )
+
+    async def test_staff_user_can_list_and_get_entries(self):
+        self._as(self.user)
+
+        listed = await list_audit_log(model_type="part.part", model_id=self.part.pk)
+        self.assertIn(self.entry.pk, [e["pk"] for e in listed["results"]])
+
+        detail = await get_audit_log_entry(
+            self.entry.pk, filters={"changes_detail": True}
+        )
+        self.assertEqual(detail["pk"], self.entry.pk)
+        self.assertEqual(detail["model_type"], "part.part")
+        self.assertIn("changes_detail", detail)
+
+    async def test_non_staff_user_is_rejected(self):
+        """Holding the audited model's role is not enough without staff status."""
+        self._as(self.non_staff_user)
+
+        with self.assertRaises(ToolError) as cm:
+            await list_audit_log()
+        self.assertIn("staff", str(cm.exception).lower())
+
+        with self.assertRaises(ToolError):
+            await get_audit_log_entry(self.entry.pk)
+
+    async def test_core_view_also_rejects_non_staff_user(self):
+        """The core endpoint enforces staff status independently of the tool's own check."""
+        self._as(self.non_staff_user)
+
+        with self.assertRaises(ToolError):
+            await call_view(
+                discovery.RESOURCE_LOADERS["audit_log"](), "GET", "/api/audit/"
+            )
+
+    async def test_staff_user_without_audited_model_role_sees_no_entries(self):
+        """Entries are still filtered by the caller's view permission on each audited model."""
+        staff_no_role = await sync_to_async(get_user_model().objects.create_user)(
+            username="audit_staff_no_role",
+            password="password",
+            email="audit-staff-no-role@example.org",
+            is_staff=True,
+        )
+        self._as(staff_no_role)
+
+        listed = await list_audit_log(model_type="part.part")
+        self.assertEqual(listed["results"], [])
+
+        with self.assertRaises(ToolError):
+            await get_audit_log_entry(self.entry.pk)
+
+    async def test_oauth2_read_scope_does_not_grant_view_access(self):
+        """A non-staff user's 'g:read' token must not pass the core view's
+        IsAdminOrAdminScope check - the scope derived for the audit view must
+        be 'a:staff', not the generic 'g:read' fallback (regression test for
+        oauth2_bridge._required_alternate_scopes()). Calls the view directly
+        to bypass the tool's own staff check.
+        """
+        self._as(self.non_staff_user, oauth2_token=self.non_staff_token_read)
+
+        with self.assertRaises(ToolError):
+            await call_view(
+                discovery.RESOURCE_LOADERS["audit_log"](), "GET", "/api/audit/"
+            )
+
+    async def test_oauth2_token_with_staff_scope_succeeds(self):
+        self._as(self.user, oauth2_token=self.staff_token_staff)
+
+        listed = await list_audit_log(model_type="part.part")
+        self.assertIn(self.entry.pk, [e["pk"] for e in listed["results"]])
+
+        self.assertIn("list_audit_log", await self._visible())
+
+    async def test_oauth2_staff_scope_does_not_bypass_staff_requirement(self):
+        """IsAdminOrAdminScope alone would admit any 'a:staff' token - the tool must not."""
+        self._as(self.non_staff_user, oauth2_token=self.non_staff_token_staff)
+
+        with self.assertRaises(ToolError):
+            await list_audit_log()
+
+        self.assertNotIn("list_audit_log", await self._visible())
+
+    async def test_visible_to_staff_only(self):
+        self._as(self.user)
+        names = await self._visible()
+        self.assertIn("list_audit_log", names)
+        self.assertIn("get_audit_log_entry", names)
+
+        self._as(self.non_staff_user)
+        names = await self._visible()
+        self.assertNotIn("list_audit_log", names)
+        self.assertNotIn("get_audit_log_entry", names)
+
+    def test_describe_filters_covers_audit_log(self):
+        result = describe_filters("audit_log")
+
+        self.assertIn("part.part", result["filters"]["model_type"]["choices"])
+        self.assertIn("timestamp", result["ordering_fields"])
+
+    async def test_output_schema_derived_from_serializer(self):
+        tools = {tool.name: tool for tool in await mcp.list_tools()}
+
+        props = tools["get_audit_log_entry"].output_schema["properties"]
+        self.assertIn("changes", props)
+        self.assertIn("model_type", props)
+
+
+@override_settings(PLUGIN_TESTING_SETUP=True)
+class AuditLogVersionCompatTest(InvenTreeTestCase):
+    """The audit log tools must degrade cleanly on InvenTree < 1.7.0 (no 'audit' app).
+
+    Simulated by making the 'audit' modules unimportable, rather than actually
+    downgrading InvenTree - so this also runs (and passes) on older cores.
+    """
+
+    def _without_audit_app(self):
+        modules = {name: None for name in ("audit", "audit.api", "audit.serializers")}
+        patcher = patch.dict(sys.modules, modules)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+        before = set(view_resolution._unresolved)
+        self.addCleanup(view_resolution._unresolved.clear)
+        self.addCleanup(view_resolution._unresolved.update, before)
+        view_resolution._unresolved.discard(("audit.api", "AuditLogViewSet"))
+
+    async def test_tools_report_unavailable(self):
+        self._without_audit_app()
+        context.set_current_user(self.user)
+        self.addCleanup(context.set_current_user, None)
+
+        with self.assertRaises(ToolError) as cm:
+            await list_audit_log()
+        self.assertIn("unavailable", str(cm.exception).lower())
+
+        names = await tool_visibility.visible_tool_names(
+            tool.name for tool in await mcp.list_tools()
+        )
+        self.assertNotIn("list_audit_log", names)
+        self.assertNotIn("get_audit_log_entry", names)
+
+    def test_describe_filters_reports_unavailable(self):
+        self._without_audit_app()
+
+        with self.assertRaises(ToolError):
+            describe_filters("audit_log")
+
+    def test_output_schemas_fall_back(self):
+        from .output_schemas import _audit_log_schemas
+
+        self._without_audit_app()
+
+        self.assertEqual(
+            _audit_log_schemas(),
+            {
+                "list_audit_log": {"type": "object"},
+                "get_audit_log_entry": {"type": "object"},
+            },
+        )
