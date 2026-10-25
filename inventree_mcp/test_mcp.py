@@ -53,10 +53,15 @@ from plugin import registry
 from stock.models import (
     StockItem,
     StockItemTestResult,
-    StockItemTracking,
     StockLocation,
 )
 from users.models import ApiToken
+
+try:
+    # Removed from newer InvenTree core versions
+    from stock.models import StockItemTracking
+except ImportError:
+    StockItemTracking = None
 
 try:
     # The audit app only exists from InvenTree 1.7.0 (core PR #13069)
@@ -339,9 +344,10 @@ class MCPToolPermissionTest(InvenTreeTestCase):
         )
 
         # --- Stock tracking / test result fixtures ---
-        cls.stock_tracking = StockItemTracking.objects.create(
-            item=cls.stock_item, notes="Test tracking entry"
-        )
+        if StockItemTracking is not None:
+            cls.stock_tracking = StockItemTracking.objects.create(
+                item=cls.stock_item, notes="Test tracking entry"
+            )
         cls.test_template = PartTestTemplate.objects.create(
             part=cls.part, test_name="Continuity Test"
         )
@@ -546,10 +552,12 @@ class MCPToolPermissionTest(InvenTreeTestCase):
             "parameter_template": list_parameter_templates,
             "return_order": list_return_orders,
             "return_order_line": list_return_order_lines,
-            "stock_tracking": list_stock_tracking,
             "stock_test_result": list_stock_test_results,
             "project_code": list_project_codes,
         }
+
+        if StockItemTracking is not None:
+            list_tools_by_resource["stock_tracking"] = list_stock_tracking
 
         for resource, tool_fn in list_tools_by_resource.items():
             ordering_fields = describe_filters(resource)["ordering_fields"]
@@ -1080,6 +1088,7 @@ class MCPToolPermissionTest(InvenTreeTestCase):
         with self.assertRaises(ToolError):
             await get_return_order_line(self.ro_line.pk)
 
+    @unittest.skipIf(StockItemTracking is None, "StockItemTracking removed from core")
     async def test_authorized_user_can_list_and_get_stock_tracking(self):
         self._as(self.user)
 
@@ -1107,10 +1116,11 @@ class MCPToolPermissionTest(InvenTreeTestCase):
         """
         self._as(self.no_access_user)
 
-        with self.assertRaises(ToolError):
-            await list_stock_tracking()
-        with self.assertRaises(ToolError):
-            await get_stock_tracking(self.stock_tracking.pk)
+        if StockItemTracking is not None:
+            with self.assertRaises(ToolError):
+                await list_stock_tracking()
+            with self.assertRaises(ToolError):
+                await get_stock_tracking(self.stock_tracking.pk)
         with self.assertRaises(ToolError):
             await list_stock_test_results()
         with self.assertRaises(ToolError):
@@ -1848,9 +1858,10 @@ class DescribeFiltersTest(InvenTreeTestCase):
         self.assertIn("received", describe_filters("return_order_line")["filters"])
 
     def test_describe_filters_covers_stock_history_resources(self):
-        tracking_filters = describe_filters("stock_tracking")["filters"]
-        self.assertIn("item", tracking_filters)
-        self.assertIn("user", tracking_filters)
+        if StockItemTracking is not None:
+            tracking_filters = describe_filters("stock_tracking")["filters"]
+            self.assertIn("item", tracking_filters)
+            self.assertIn("user", tracking_filters)
 
         result_filters = describe_filters("stock_test_result")["filters"]
         self.assertIn("template", result_filters)
@@ -2524,6 +2535,10 @@ class WellKnownCompatTest(unittest.TestCase):
 class AuditLogToolTest(InvenTreeTestCase):
     """Verify the audit log tools are restricted to staff users.
 
+    Staff-only is enforced by the tools themselves (tools/audit_log.py), not
+    just the core view - later core versions open the endpoint to any
+    authenticated user, filtered by per-model view permission.
+
     cls.user is staff (InvenTreeTestCase default), with the 'part.view' role
     so it may also see entries for audited Part records.
     """
@@ -2612,15 +2627,6 @@ class AuditLogToolTest(InvenTreeTestCase):
         with self.assertRaises(ToolError):
             await get_audit_log_entry(self.entry.pk)
 
-    async def test_core_view_also_rejects_non_staff_user(self):
-        """The core endpoint enforces staff status independently of the tool's own check."""
-        self._as(self.non_staff_user)
-
-        with self.assertRaises(ToolError):
-            await call_view(
-                discovery.RESOURCE_LOADERS["audit_log"](), "GET", "/api/audit/"
-            )
-
     async def test_staff_user_without_audited_model_role_sees_no_entries(self):
         """Entries are still filtered by the caller's view permission on each audited model."""
         staff_no_role = await sync_to_async(get_user_model().objects.create_user)(
@@ -2637,19 +2643,26 @@ class AuditLogToolTest(InvenTreeTestCase):
         with self.assertRaises(ToolError):
             await get_audit_log_entry(self.entry.pk)
 
-    async def test_oauth2_read_scope_does_not_grant_view_access(self):
-        """A non-staff user's 'g:read' token must not pass the core view's
-        IsAdminOrAdminScope check - the scope derived for the audit view must
-        be 'a:staff', not the generic 'g:read' fallback (regression test for
-        oauth2_bridge._required_alternate_scopes()). Calls the view directly
-        to bypass the tool's own staff check.
+    async def test_oauth2_bridge_honours_view_declared_staff_scope(self):
+        """A non-staff user's 'g:read' token must not pass a staff-scoped view
+        on an unmapped model - the scope derived for it must be 'a:staff',
+        not the generic 'g:read' fallback (regression test for
+        oauth2_bridge._required_alternate_scopes()).
+
+        Uses a subclass pinned to IsAdminOrAdminScope, rather than the core
+        view itself, so this doesn't depend on which permission class a
+        given core version gives the audit log endpoint.
         """
+        from audit.api import AuditLogViewSet
+        from InvenTree.permissions import IsAdminOrAdminScope
+
+        class StaffOnlyAuditLogViewSet(AuditLogViewSet):
+            permission_classes: ClassVar[list] = [IsAdminOrAdminScope]
+
         self._as(self.non_staff_user, oauth2_token=self.non_staff_token_read)
 
         with self.assertRaises(ToolError):
-            await call_view(
-                discovery.RESOURCE_LOADERS["audit_log"](), "GET", "/api/audit/"
-            )
+            await call_view(StaffOnlyAuditLogViewSet, "GET", "/api/audit/")
 
     async def test_oauth2_token_with_staff_scope_succeeds(self):
         self._as(self.user, oauth2_token=self.staff_token_staff)
@@ -2734,14 +2747,68 @@ class AuditLogVersionCompatTest(InvenTreeTestCase):
             describe_filters("audit_log")
 
     def test_output_schemas_fall_back(self):
-        from .output_schemas import _audit_log_schemas
+        from .output_schemas import _optional_schemas
 
         self._without_audit_app()
 
         self.assertEqual(
-            _audit_log_schemas(),
+            _optional_schemas(
+                "audit.serializers",
+                "AuditLogEntrySerializer",
+                "list_audit_log",
+                "get_audit_log_entry",
+            ),
             {
                 "list_audit_log": {"type": "object"},
                 "get_audit_log_entry": {"type": "object"},
             },
         )
+
+
+class StockTrackingCompatTest(InvenTreeTestCase):
+    """The stock tracking tools must degrade cleanly once core removes StockItemTracking.
+
+    Newer InvenTree core versions removed the model along with its serializer
+    and API views - the plugin must still load, and the tools must report as
+    unavailable rather than crash.
+    """
+
+    def test_output_schemas_fall_back_for_missing_serializer(self):
+        """A module that exists but lacks the class (AttributeError, not ImportError)."""
+        from .output_schemas import _optional_schemas
+
+        with patch.dict(sys.modules["stock.serializers"].__dict__):
+            sys.modules["stock.serializers"].__dict__.pop(
+                "StockTrackingSerializer", None
+            )
+
+            self.assertEqual(
+                _optional_schemas(
+                    "stock.serializers",
+                    "StockTrackingSerializer",
+                    "list_stock_tracking",
+                    "get_stock_tracking",
+                ),
+                {
+                    "list_stock_tracking": {"type": "object"},
+                    "get_stock_tracking": {"type": "object"},
+                },
+            )
+
+    @unittest.skipIf(StockItemTracking is not None, "StockItemTracking still in core")
+    async def test_tools_report_unavailable(self):
+        context.set_current_user(self.user)
+        self.addCleanup(context.set_current_user, None)
+
+        with self.assertRaises(ToolError) as cm:
+            await list_stock_tracking()
+        self.assertIn("unavailable", str(cm.exception).lower())
+
+        with self.assertRaises(ToolError):
+            await get_stock_tracking(1)
+
+        names = await tool_visibility.visible_tool_names(
+            tool.name for tool in await mcp.list_tools()
+        )
+        self.assertNotIn("list_stock_tracking", names)
+        self.assertNotIn("get_stock_tracking", names)
