@@ -30,6 +30,7 @@ model (permissive, never rejects real data) are deliberately decoupled.
 
 from __future__ import annotations
 
+from importlib import import_module
 from typing import Any
 
 from build.serializers import BuildItemSerializer, BuildLineSerializer, BuildSerializer
@@ -66,7 +67,6 @@ from stock.serializers import (
     LocationSerializer,
     StockItemSerializer,
     StockItemTestResultSerializer,
-    StockTrackingSerializer,
 )
 
 from .mcp_server import mcp
@@ -75,26 +75,30 @@ from .schema_introspection import paginated_schema, serializer_schema
 _PERMISSIVE_OUTPUT_MODEL = RootModel[dict[str, Any]]
 
 
-def _audit_log_schemas() -> dict[str, dict[str, Any]]:
-    """Output schemas for the audit log tools, tolerating an older InvenTree core.
+def _optional_schemas(
+    module_path: str, class_name: str, list_tool: str, get_tool: str
+) -> dict[str, dict[str, Any]]:
+    """Output schemas for a list/get tool pair whose serializer may not exist.
 
-    Unlike every other serializer above, the 'audit' app only exists from
-    InvenTree 1.7.0 - a module-level import would break plugin load
-    entirely on older versions. Fall back to an unconstrained object schema
-    there; the tools themselves report as unavailable (see
-    tools/audit_log.py).
+    For serializers that only exist on some InvenTree core versions - a
+    module-level import (as for every serializer above) would break plugin
+    load entirely where it's missing. Falls back to an unconstrained object
+    schema there; the tools themselves report as unavailable via
+    view_resolution.resolve_view(). Covers:
+
+    - audit.serializers.AuditLogEntrySerializer: the 'audit' app only
+      exists from InvenTree 1.7.0.
+    - stock.serializers.StockTrackingSerializer: removed from newer
+      InvenTree core versions, along with the StockItemTracking model.
     """
     try:
-        from audit.serializers import AuditLogEntrySerializer
-    except ImportError:
-        return {
-            "list_audit_log": {"type": "object"},
-            "get_audit_log_entry": {"type": "object"},
-        }
+        serializer_class = getattr(import_module(module_path), class_name)
+    except (ImportError, AttributeError):
+        return {list_tool: {"type": "object"}, get_tool: {"type": "object"}}
 
     return {
-        "list_audit_log": paginated_schema(AuditLogEntrySerializer),
-        "get_audit_log_entry": serializer_schema(AuditLogEntrySerializer),
+        list_tool: paginated_schema(serializer_class),
+        get_tool: serializer_schema(serializer_class),
     }
 
 
@@ -147,13 +151,22 @@ _OUTPUT_SCHEMAS = {
     "get_return_order": serializer_schema(ReturnOrderSerializer),
     "list_return_order_lines": paginated_schema(ReturnOrderLineItemSerializer),
     "get_return_order_line": serializer_schema(ReturnOrderLineItemSerializer),
-    "list_stock_tracking": paginated_schema(StockTrackingSerializer),
-    "get_stock_tracking": serializer_schema(StockTrackingSerializer),
+    **_optional_schemas(
+        "stock.serializers",
+        "StockTrackingSerializer",
+        "list_stock_tracking",
+        "get_stock_tracking",
+    ),
     "list_stock_test_results": paginated_schema(StockItemTestResultSerializer),
     "get_stock_test_result": serializer_schema(StockItemTestResultSerializer),
     "list_project_codes": paginated_schema(ProjectCodeSerializer),
     "get_project_code": serializer_schema(ProjectCodeSerializer),
-    **_audit_log_schemas(),
+    **_optional_schemas(
+        "audit.serializers",
+        "AuditLogEntrySerializer",
+        "list_audit_log",
+        "get_audit_log_entry",
+    ),
     "make_web_link": {
         "type": "object",
         "properties": {
