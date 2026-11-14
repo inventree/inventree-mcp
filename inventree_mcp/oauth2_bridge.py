@@ -46,7 +46,11 @@ and attaches it as a static attribute (fixes 1), and swaps
 InvenTreeTokenMatchesOASRequirements for a corrected subclass that skips the
 broken super() fallback (fixes 2). Everything else in the view's normal
 permission stack (IsAuthenticated, ModelPermission, RolePermission) is left
-untouched. Remove this workaround if/when the core bugs are fixed.
+untouched.
+
+Both bugs are fixed in InvenTree 1.7.0 and later, where scoped_view_class()
+returns the view unchanged (see _CORE_NEEDS_WORKAROUND). The workaround can be
+deleted outright once the plugin's MIN_VERSION reaches 1.7.0.
 """
 
 from __future__ import annotations
@@ -64,6 +68,13 @@ from users.authentication import ExtendedOAuth2Authentication
 
 _scope_resolver = InvenTreeRoleScopeMixin()
 
+# Both core bugs described above were fixed in InvenTree 1.7.0, which replaced
+# OASTokenMixin.check_oauth2_authentication() with a scope check that runs
+# through each permission class's own get_required_alternate_scopes(). On
+# those versions the workaround is not just redundant but broken (it calls
+# the removed method), so feature-detect and leave the view untouched.
+_CORE_NEEDS_WORKAROUND = hasattr(OASTokenMixin, "check_oauth2_authentication")
+
 
 def authentication_classes_for(user: Any, oauth2_token: Any) -> list[type]:
     """Return an authentication_classes list that resolves to (user, oauth2_token)."""
@@ -76,13 +87,25 @@ def authentication_classes_for(user: Any, oauth2_token: Any) -> list[type]:
 
 
 class _FixedTokenMatchesOASRequirements(InvenTreeTokenMatchesOASRequirements):
-    """InvenTreeTokenMatchesOASRequirements without the broken super() fallback (bug 2 above)."""
+    """InvenTreeTokenMatchesOASRequirements without the broken super() fallback (bug 2 above).
+
+    In InvenTree 1.7.0+, the bugs are fixed in the parent class, so this just delegates.
+    In earlier versions, check_oauth2_authentication() exists and is called here.
+    """
 
     def has_permission(self, request, view):
+        if not _CORE_NEEDS_WORKAROUND:
+            # Bugs are fixed in the parent; use its normal permission check
+            return super().has_permission(request, view)
+
+        # Original workaround for older InvenTree versions
         if self.is_oauth2ed(request):
             return self.check_oauth2_authentication(request, view)
 
         return bool(request.user and request.user.is_authenticated)
+
+    # Mark this method as already enforcing OAuth2 scopes to prevent double-wrapping
+    has_permission.enforces_oauth2_scopes = True
 
 
 def _fixed_permission_classes(view_cls: type) -> list[type]:
@@ -133,6 +156,9 @@ def scoped_view_class(view_cls: type) -> type:
     being cleanly denied when the scope doesn't match (bug 2) - see the
     module docstring.
     """
+    if not _CORE_NEEDS_WORKAROUND:
+        return view_cls
+
     required_alternate_scopes = _required_alternate_scopes(view_cls)
     return type(
         f"_ScopeWorkaround_{view_cls.__name__}",
