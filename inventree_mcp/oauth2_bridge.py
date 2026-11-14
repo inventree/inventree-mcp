@@ -104,6 +104,9 @@ class _FixedTokenMatchesOASRequirements(InvenTreeTokenMatchesOASRequirements):
 
         return bool(request.user and request.user.is_authenticated)
 
+    # Mark this method as already enforcing OAuth2 scopes to prevent double-wrapping
+    has_permission.enforces_oauth2_scopes = True
+
 
 def _fixed_permission_classes(view_cls: type) -> list[type]:
     classes = getattr(view_cls, "permission_classes", None) or list(
