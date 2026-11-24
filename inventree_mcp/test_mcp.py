@@ -72,7 +72,7 @@ except ImportError:
 from . import PLUGIN_VERSION, context, settings, tool_visibility, view_resolution
 from .filter_introspection import _default_ordering_fields
 from .mcp_server import mcp
-from .proxy import call_view
+from .proxy import _origin_request_kwargs, call_view
 from .schema_introspection import paginated_schema, serializer_schema
 from .server_card import SERVER_CARD_SCHEMA, build_server_card
 from .tools import discovery
@@ -2301,6 +2301,105 @@ class ToolLoggingTest(InvenTreeTestCase):
         end_args = mock_logger.warning.call_args_list[0].args
         self.assertIn("failed", end_args[0])
         self.assertIn("get_project_code", end_args)
+
+
+@override_settings(PLUGIN_TESTING_SETUP=True)
+class ProxyRequestHostTest(InvenTreeTestCase):
+    """Regression tests for issue #59: proxied requests must not use 'testserver'.
+
+    proxy.call_view() builds its internal requests with APIRequestFactory -
+    Django's *test* RequestFactory - whose default host is "testserver".
+    Django's test runner quietly appends "testserver" to ALLOWED_HOSTS, so
+    without overriding ALLOWED_HOSTS here these tests could never fail the
+    way a production deployment did: DisallowedHost on any core code path
+    that builds an absolute URL (e.g. pagination next/previous links), or
+    "http://testserver/..." URLs in tool results once 'testserver' was
+    allowed.
+    """
+
+    URL = "/plugin/inventree-mcp/mcp/"
+    HOST = "inventree.example.com"
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+
+        cls.api_token = _raw_api_token(
+            ApiToken.objects.create(user=cls.user, name="proxy-host-test-token")
+        )
+
+        # More than one code, so a limit=1 list has a `next` page link -
+        # built by DRF's pagination via request.build_absolute_uri().
+        for code in ("HOST-A", "HOST-B"):
+            ProjectCode.objects.create(code=code, description=code)
+
+        registry.reload_plugins(full_reload=True, collect=True)
+        registry.set_plugin_state("inventree-mcp", True)
+
+    def _call_tool(self, name: str, arguments: dict[str, Any], **extra) -> Any:
+        return Client(enforce_csrf_checks=True).post(
+            self.URL,
+            data=json.dumps({
+                "jsonrpc": "2.0",
+                "id": 4,
+                "method": "tools/call",
+                "params": {"name": name, "arguments": arguments},
+            }),
+            content_type="application/json",
+            HTTP_ACCEPT="application/json, text/event-stream",
+            HTTP_AUTHORIZATION=f"Token {self.api_token}",
+            **extra,
+        )
+
+    def test_tool_call_uses_incoming_request_host_and_scheme(self):
+        with override_settings(ALLOWED_HOSTS=[self.HOST]):
+            response = self._call_tool(
+                "list_project_codes",
+                {"limit": 1},
+                HTTP_HOST=self.HOST,
+                secure=True,
+            )
+
+        self.assertEqual(response.status_code, 200)
+        result = json.loads(response.content)["result"]
+        self.assertFalse(result["isError"], result)
+
+        envelope = result["structuredContent"]
+        self.assertEqual(len(envelope["results"]), 1)
+        self.assertTrue(
+            envelope["next"].startswith(f"https://{self.HOST}/api/"), envelope["next"]
+        )
+        self.assertNotIn(b"testserver", response.content)
+
+    async def test_call_view_without_request_falls_back_to_site_url(self):
+        """No incoming request bound (e.g. a tool invoked directly) - use SITE_URL."""
+        from common.api import ProjectCodeList
+
+        context.set_current_user(self.user)
+        self.addCleanup(context.set_current_user, None)
+
+        with override_settings(
+            ALLOWED_HOSTS=["site.example.com"], SITE_URL="https://site.example.com"
+        ):
+            body = await call_view(
+                ProjectCodeList, "GET", "/api/project-code/", query_params={"limit": 1}
+            )
+
+        self.assertTrue(
+            body["next"].startswith("https://site.example.com/api/"), body["next"]
+        )
+
+    def test_origin_kwargs_prefer_incoming_request_over_site_url(self):
+        token = context.set_current_user(
+            self.user, origin=("mcp.example.com:8443", False)
+        )
+        self.addCleanup(context.reset_current_user, token)
+
+        with override_settings(SITE_URL="https://site.example.com"):
+            self.assertEqual(
+                _origin_request_kwargs(),
+                {"HTTP_HOST": "mcp.example.com:8443", "secure": False},
+            )
 
 
 class PluginSettingsTest(InvenTreeTestCase):

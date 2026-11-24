@@ -5,6 +5,10 @@ about Django requests. The transport view sets the current identity via a
 contextvar before handing the request off to the MCP session manager, so
 tools (and the proxy layer) can recover *who* is calling without threading a
 request object through every tool signature.
+
+The incoming request's origin (validated host + scheme) is carried along
+too, so proxy.call_view() can build its internal requests against the same
+host the client actually reached - see proxy.py's _origin_request_kwargs().
 """
 
 from __future__ import annotations
@@ -25,6 +29,11 @@ class _Identity:
     # proxy.call_view() can make the proxied view see the token's *actual*
     # granted scopes, not just the user's role permissions. See proxy.py.
     oauth2_token: Any | None = None
+    # (host, is_secure) of the incoming MCP request - host as returned by
+    # HttpRequest.get_host(), i.e. already validated against ALLOWED_HOSTS
+    # and with USE_X_FORWARDED_HOST / SECURE_PROXY_SSL_HEADER applied.
+    # None outside a real HTTP request.
+    origin: tuple[str, bool] | None = None
 
 
 _current_identity: ContextVar[_Identity | None] = ContextVar(
@@ -33,10 +42,15 @@ _current_identity: ContextVar[_Identity | None] = ContextVar(
 
 
 def set_current_user(
-    user: AbstractUser | None, oauth2_token: Any | None = None
+    user: AbstractUser | None,
+    oauth2_token: Any | None = None,
+    origin: tuple[str, bool] | None = None,
 ) -> Token:
-    """Bind *user* (and, if OAuth2-authenticated, the real access token) for this context."""
-    identity = _Identity(user, oauth2_token) if user is not None else None
+    """Bind *user* (and, if OAuth2-authenticated, the real access token) for this context.
+
+    *origin* is the incoming request's (host, is_secure) - see _Identity.
+    """
+    identity = _Identity(user, oauth2_token, origin) if user is not None else None
     return _current_identity.set(identity)
 
 
@@ -96,3 +110,9 @@ def get_current_oauth2_token() -> Any | None:
     """Return the real OAuth2 access token for the current MCP request, if any."""
     identity = _current_identity.get()
     return identity.oauth2_token if identity else None
+
+
+def get_current_origin() -> tuple[str, bool] | None:
+    """Return the incoming MCP request's (host, is_secure), if bound."""
+    identity = _current_identity.get()
+    return identity.origin if identity else None

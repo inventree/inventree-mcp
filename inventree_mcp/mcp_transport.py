@@ -34,6 +34,7 @@ import asyncio
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from asgiref.sync import async_to_sync
+from django.core.exceptions import DisallowedHost
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.urls import path
 from django.views.decorators.csrf import csrf_exempt
@@ -220,7 +221,15 @@ class MCPView(APIView):
         is_oauth2 = isinstance(
             drf_request.successful_authenticator, OAuth2Authentication
         )
-        token = set_current_user(user, drf_request.auth if is_oauth2 else None)
+        try:
+            # get_host() validates against ALLOWED_HOSTS - a request that got
+            # this far through Django's middleware has already passed it.
+            origin = (request.get_host(), request.is_secure())
+        except DisallowedHost:
+            return _error_response(400, "Invalid Host header")
+        token = set_current_user(
+            user, drf_request.auth if is_oauth2 else None, origin=origin
+        )
         try:
             # async_to_sync (rather than a hand-rolled event loop) is what lets
             # proxy.call_view()'s sync_to_async(thread_sensitive=True) route

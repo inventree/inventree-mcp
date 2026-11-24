@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 from typing import Any
+from urllib.parse import urlsplit
 
 from asgiref.sync import sync_to_async
 from mcp.server.mcpserver.exceptions import ToolError
@@ -19,11 +20,47 @@ from rest_framework.test import APIRequestFactory, force_authenticate
 from rest_framework.views import APIView
 from rest_framework.viewsets import ViewSetMixin
 
-from .context import get_current_oauth2_token, get_current_user
+from .context import get_current_oauth2_token, get_current_origin, get_current_user
 from .oauth2_bridge import authentication_classes_for, scoped_view_class
 from .settings import get_plugin_setting
 
 _factory = APIRequestFactory()
+
+
+def _origin_request_kwargs() -> dict[str, Any]:
+    """Host/scheme kwargs for an internal request, matching the real MCP request.
+
+    APIRequestFactory is Django's *test* RequestFactory underneath, whose
+    default environ hardcodes SERVER_NAME "testserver". Left as-is, any core
+    code that builds an absolute URL from the proxied request (pagination
+    next/previous links, get_base_url(request), ...) either raises
+    DisallowedHost - 'testserver' isn't in a production ALLOWED_HOSTS - or
+    leaks "http://testserver/..." URLs into tool results (issue #59).
+
+    Uses the incoming MCP request's own host and scheme when there is one,
+    so internal requests see exactly what the REST API would for the same
+    client. Otherwise (e.g. a tool invoked outside a real HTTP request)
+    falls back to the instance's configured base URL (SITE_URL /
+    INVENTREE_BASE_URL). With neither available the factory default is
+    left in place.
+    """
+    origin = get_current_origin()
+
+    if origin is not None:
+        host, secure = origin
+        return {"HTTP_HOST": host, "secure": secure}
+
+    from InvenTree.helpers_model import get_base_url
+
+    base_url = urlsplit(get_base_url() or "")
+    if base_url.hostname:
+        return {
+            "HTTP_HOST": base_url.netloc.rpartition("@")[2],
+            "secure": base_url.scheme == "https",
+        }
+
+    return {}
+
 
 # HTTP method -> ViewSet action, for the case where a pk *is* present
 # (GET/'retrieve' is the odd one out - see _viewset_actions()).
@@ -82,10 +119,12 @@ def _call_view_sync(
 
     factory_method = getattr(_factory, method.lower())
 
+    origin_kwargs = _origin_request_kwargs()
+
     if method == "GET":
-        request = factory_method(path, data=query_params or {})
+        request = factory_method(path, data=query_params or {}, **origin_kwargs)
     else:
-        request = factory_method(path, data=data or {}, format="json")
+        request = factory_method(path, data=data or {}, format="json", **origin_kwargs)
 
     actions = _viewset_actions(view_cls, method, view_kwargs)
 
@@ -135,7 +174,7 @@ def _user_has_access_sync(view_cls: type[APIView], method: str) -> bool:
 
     oauth2_token = get_current_oauth2_token()
     method = method.upper()
-    request = _factory.generic(method, "/")
+    request = _factory.generic(method, "/", **_origin_request_kwargs())
 
     if oauth2_token is not None:
         # Same reasoning as _call_view_sync's OAuth2 branch: a synthetic
