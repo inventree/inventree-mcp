@@ -12,10 +12,11 @@ these tools are hidden from tools/list (see tool_visibility.py) and a direct
 call raises a clean ToolError via call_view(), rather than breaking plugin
 load.
 
-Staff only: the core API endpoint is restricted to staff users
-(IsAdminOrAdminScope), and additionally filters entries down to the audited
-models the user can view. _require_staff() below repeats the staff check
-before dispatch - see its docstring.
+Staff only: this tool is restricted to staff users (see _require_staff()).
+The core endpoint itself additionally filters entries down to the audited
+models the user can view, and enforces its own OAuth2 scope requirement
+(which permission class it uses - and so which scope - varies between core
+versions; call_view() applies whatever the running core declares).
 """
 
 from __future__ import annotations
@@ -38,12 +39,14 @@ def _audit_log_view() -> type | None:
 def _require_staff() -> None:
     """Reject non-staff callers before the request reaches the core view.
 
-    Defence in depth on top of the core view's own IsAdminOrAdminScope: that
-    class also admits any request whose OAuth2 token carries the 'a:staff'
-    scope, without checking the user's own is_staff flag. This tool is
-    specified as staff-only regardless of how the caller authenticated, so
-    the user's staff status is checked here as well - an OAuth2 token still
-    has to carry the right scope too (enforced by call_view()).
+    The core view's own permission class doesn't reliably require staff
+    status: depending on core version it is either IsAdminOrAdminScope
+    (which admits any request whose OAuth2 token carries the 'a:staff' scope,
+    without checking the user's is_staff flag) or IsAuthenticatedOrReadScope
+    (any authenticated user). This tool is specified as staff-only regardless
+    of how the caller authenticated, so the user's staff status is checked
+    here - an OAuth2 token still has to carry whatever scope the core view
+    requires too (enforced by call_view()).
     """
     try:
         user = get_current_user()

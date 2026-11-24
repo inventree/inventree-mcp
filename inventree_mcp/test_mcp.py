@@ -2586,7 +2586,12 @@ class AuditLogToolTest(InvenTreeTestCase):
                 user=user, application=app, token=token, expires=expires, scope=scope
             )
 
-        cls.staff_token_staff = _token(cls.user, "mcp-audit-staff-staff", "a:staff")
+        # 'g:read' as well as 'a:staff': newer cores serve the audit log via
+        # IsAuthenticatedOrReadScope (and enforce its scope), older ones via
+        # IsAdminOrAdminScope - carry both so the token suits either.
+        cls.staff_token_staff = _token(
+            cls.user, "mcp-audit-staff-staff", "a:staff g:read"
+        )
         cls.non_staff_token_read = _token(
             cls.non_staff_user, "mcp-audit-nonstaff-read", "g:read"
         )
@@ -2663,6 +2668,28 @@ class AuditLogToolTest(InvenTreeTestCase):
 
         with self.assertRaises(ToolError):
             await call_view(StaffOnlyAuditLogViewSet, "GET", "/api/audit/")
+
+    async def test_oauth2_rejected_by_proxied_view_without_scope_check(self):
+        """call_view()'s pre-resolved OAuth2 authenticator must keep core's
+        guard that refuses OAuth2 tokens on views whose permission classes
+        don't enforce token scopes - otherwise any scoped token would pass
+        a plain IsAuthenticated view when proxied through MCP.
+        """
+        from audit.api import AuditLogViewSet
+        from rest_framework.permissions import IsAuthenticated
+        from users.authentication import ExtendedOAuth2Authentication
+
+        if not hasattr(ExtendedOAuth2Authentication, "view_enforces_scopes"):
+            self.skipTest("core does not reject OAuth2 on unscoped views")
+
+        class UnscopedAuditLogViewSet(AuditLogViewSet):
+            permission_classes: ClassVar[list] = [IsAuthenticated]
+
+        self._as(self.user, oauth2_token=self.staff_token_staff)
+
+        with self.assertRaises(ToolError) as cm:
+            await call_view(UnscopedAuditLogViewSet, "GET", "/api/audit/")
+        self.assertIn("OAuth2", str(cm.exception))
 
     async def test_oauth2_token_with_staff_scope_succeeds(self):
         self._as(self.user, oauth2_token=self.staff_token_staff)

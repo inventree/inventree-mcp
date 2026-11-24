@@ -63,6 +63,7 @@ from InvenTree.permissions import (
     OASTokenMixin,
     map_scope,
 )
+from rest_framework import exceptions
 from rest_framework.settings import api_settings
 from users.authentication import ExtendedOAuth2Authentication
 
@@ -81,6 +82,15 @@ def authentication_classes_for(user: Any, oauth2_token: Any) -> list[type]:
 
     class _PreResolvedOAuth2Authentication(ExtendedOAuth2Authentication):
         def authenticate(self, request):
+            # Mirror core's ExtendedOAuth2Authentication.authenticate(): newer
+            # cores refuse OAuth2 tokens on views that don't enforce token
+            # scopes. Overriding authenticate() would otherwise skip that
+            # guard for proxied calls, so apply it here when core provides it.
+            view_enforces_scopes = getattr(self, "view_enforces_scopes", None)
+            if view_enforces_scopes is not None and not view_enforces_scopes(request):
+                raise exceptions.PermissionDenied(
+                    "OAuth2 tokens are not accepted for this endpoint"
+                )
             return (user, oauth2_token)
 
     return [_PreResolvedOAuth2Authentication]
