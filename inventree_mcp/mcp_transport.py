@@ -156,6 +156,25 @@ def _error_response(status: int, message: str) -> JsonResponse:
     )
 
 
+class _MCPOAuth2Authentication(ExtendedOAuth2Authentication):
+    """OAuth2 authentication for the MCP endpoint itself.
+
+    Newer InvenTree cores reject OAuth2 tokens outright on any view whose
+    permission classes don't enforce token scopes (no OASTokenMixin) - a
+    fail-closed guard against scoped tokens reaching unscoped endpoints.
+    MCPView deliberately has no permission classes, but it doesn't serve any
+    data itself: every tool that touches InvenTree data dispatches through
+    proxy.call_view(), which runs the target core view's own permission
+    stack - including its OAuth2 scope check - against the caller's real
+    token. Scopes are therefore enforced per tool call rather than here.
+
+    On older cores without view_enforces_scopes() this override is unused.
+    """
+
+    def view_enforces_scopes(self, request) -> bool:
+        return True
+
+
 class MCPView(APIView):
     """DRF view handling MCP Streamable HTTP transport requests.
 
@@ -169,7 +188,7 @@ class MCPView(APIView):
     authentication_classes: ClassVar[list] = [
         ApiTokenAuthentication,
         BasicAuthentication,
-        ExtendedOAuth2Authentication,
+        _MCPOAuth2Authentication,
     ]
     permission_classes: ClassVar[list] = []
 
